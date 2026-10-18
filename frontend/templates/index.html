@@ -1,1 +1,137 @@
-<!-- index.html – placeholder; Leaflet map and assessment form to be built in Step 3 -->
+{% extends "base.html" %}
+
+{% block title %}Dashboard – ADAPTFIT{% endblock %}
+
+{% block content %}
+<div class="dashboard-wrapper">
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="hero-content">
+      <div class="tag-pill">
+        <span class="badge-dot"></span>
+        <span>Decision-Support Prototype &bull; Phase 1 MVP</span>
+      </div>
+
+      <h1 class="hero-headline">Could this adaptation work in a new place?</h1>
+
+      <p class="hero-paragraph">
+        ADAPTFIT evaluates whether nature-based climate interventions—such as urban rain gardens—can be safely and effectively transferred from a proven reference site (Location A) to a target site (Location B). By matching documented environmental criteria (soil infiltration rates, ground slope, annual rainfall ranges, space availability, and foundation setbacks) while tracking transfer risk, ADAPTFIT delivers explainable, transparent screening to guide local engineering surveys.
+      </p>
+
+      <div class="hero-actions">
+        <a href="{{ url_for('new_assessment_page') }}" class="btn btn-primary btn-large">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Start new assessment
+        </a>
+        <a href="{{ url_for('results_page') }}" class="btn btn-secondary btn-large">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+          View recent results
+        </a>
+      </div>
+
+      <!-- Prominent PRD Section 13 Disclaimer Box -->
+      <div class="disclaimer-callout">
+        <div class="disclaimer-callout-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
+        <div class="disclaimer-callout-body">
+          <h4 class="disclaimer-callout-title">Statutory Disclaimer (PRD §13)</h4>
+          <p class="disclaimer-callout-text">
+            &ldquo;ADAPTFIT is a preliminary, explainable decision-support prototype. It compares documented adaptation requirements with available environmental data for reference and target locations. Results depend on data coverage, spatial resolution and the quality of the requirements; they are not a guarantee of implementation success.&rdquo;
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Key Principles Grid -->
+  <section class="features-section">
+    <div class="section-header">
+      <h2 class="section-title">Transparent Assessment Rules</h2>
+      <p class="section-subtitle">No black boxes. Every classification is strictly deterministic, explainable, and traceable.</p>
+    </div>
+
+    <div class="cards-grid">
+      <div class="feature-card">
+        <div class="feature-icon icon-green">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        </div>
+        <h3>Critical Blocker Override</h3>
+        <p>If any critical requirement fails (e.g. soil infiltration &lt; 12.7 mm/hr or slope &gt; 8%), status is automatically marked <strong>Unsuitable</strong>, regardless of how high other scores are.</p>
+        <span class="card-badge">candidate, unverified rules</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon icon-amber">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 2.1l4 4-4 4"></path>
+            <path d="M3 12.2v-2a4 4 0 0 1 4-4h14"></path>
+            <path d="M7 21.9l-4-4 4-4"></path>
+            <path d="M21 11.8v2a4 4 0 0 1-4 4H3"></path>
+          </svg>
+        </div>
+        <h3>Transfer Risk Detection</h3>
+        <p>When the target location differs significantly from the proven reference site (exceeding relative or absolute tolerances), a <strong>Transfer Risk</strong> warning is flagged even if local thresholds pass.</p>
+        <span class="card-badge">A &rarr; B comparison</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon icon-blue">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+        </div>
+        <h3>Strict Missing Data Handling</h3>
+        <p>Values are never fabricated. Missing inputs are treated as &ldquo;Unknown&rdquo;. If any critical factor is unknown or over 30% of total factor weight is missing, the engine withholds scoring with <strong>Insufficient Data</strong>.</p>
+        <span class="card-badge">Sample data for demo, not live</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Available Starter Interventions -->
+  <section class="interventions-preview">
+    <div class="preview-box">
+      <div class="preview-header">
+        <div>
+          <span class="sub-label">Starter Intervention</span>
+          <h3 class="preview-title">Rain Garden (Urban Stormwater Infiltration)</h3>
+        </div>
+        <span class="badge-status-pill badge-candidate">candidate, unverified</span>
+      </div>
+      <p class="preview-desc">
+        A shallow vegetated depression engineered to capture and infiltrate runoff from impervious surfaces, dampening peak hydrographs and improving stormwater runoff quality.
+      </p>
+      <div class="preview-criteria">
+        <div class="criteria-item"><strong>Soil Infiltration:</strong> min 12.7 mm/hr (critical)</div>
+        <div class="criteria-item"><strong>Slope:</strong> max 8.0 % (critical)</div>
+        <div class="criteria-item"><strong>Annual Rainfall:</strong> 600 – 2500 mm/yr</div>
+        <div class="criteria-item"><strong>Open Space:</strong> Present (site survey)</div>
+        <div class="criteria-item"><strong>Building Distance:</strong> min 3.0 m setback</div>
+      </div>
+      <div class="preview-footer">
+        <a href="{{ url_for('new_assessment_page') }}" class="btn btn-primary">
+          Configure Location A &amp; B &rarr;
+        </a>
+      </div>
+    </div>
+  </section>
+
+</div>
+{% endblock %}

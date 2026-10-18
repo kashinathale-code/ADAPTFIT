@@ -171,9 +171,81 @@ def test_get_assessment_by_id(client):
     assert get_data["assessment_id"] == assessment_id
     assert get_data["status"] == "suitable"
     assert len(get_data["factors"]) == 5
+    assert get_data["reference_location"]["name"] == "Location A"
+    assert get_data["reference_location"]["latitude"] == 19.10
+    assert get_data["reference_location"]["longitude"] == 73.00
+    assert get_data["target_location"]["name"] == "Location B"
+    assert get_data["target_location"]["latitude"] == 20.08
+    assert get_data["target_location"]["longitude"] == 74.11
+
+
+def test_get_assessment_custom_locations_from_db(client):
+    """Verify GET /api/assessments/<id> returns name, lat, and lon read from locations table."""
+    payload = {
+        "adaptation_id": "rain_garden",
+        "reference_location": {
+            "name": "Pune city",
+            "latitude": 18.5204,
+            "longitude": 73.8567,
+            "factors": {"soil_infiltration": 30.0, "slope": 3.0, "annual_rainfall": 1200.0, "open_space": 1.0, "building_distance": 5.0},
+        },
+        "target_location": {
+            "name": "Niphad",
+            "latitude": 20.0800,
+            "longitude": 74.1100,
+            "factors": {"soil_infiltration": 28.0, "slope": 4.0, "annual_rainfall": 1100.0, "open_space": 1.0, "building_distance": 6.0},
+        },
+    }
+    post_res = client.post("/api/assessments", json=payload)
+    assert post_res.status_code == 201
+    aid = post_res.get_json()["assessment_id"]
+
+    get_res = client.get(f"/api/assessments/{aid}")
+    assert get_res.status_code == 200
+    data = get_res.get_json()
+
+    assert data["reference_location"]["name"] == "Pune city"
+    assert data["reference_location"]["latitude"] == 18.5204
+    assert data["reference_location"]["longitude"] == 73.8567
+
+    assert data["target_location"]["name"] == "Niphad"
+    assert data["target_location"]["latitude"] == 20.0800
+    assert data["target_location"]["longitude"] == 74.1100
 
 
 def test_get_assessment_not_found(client):
     res = client.get("/api/assessments/999999")
     assert res.status_code == 404
     assert "error" in res.get_json()
+
+
+def test_frontend_dashboard_page(client):
+    res = client.get("/")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "Could this adaptation work in a new place?" in html
+    assert "ADAPTFIT" in html
+    assert "Right adaptation. Right place." in html
+    assert "Start new assessment" in html
+    assert "preliminary, explainable decision-support prototype" in html
+
+
+def test_frontend_new_assessment_page(client):
+    res = client.get("/new")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "New Transferability Assessment" in html
+    assert "leafletMap" in html
+    assert "Sample data for demo, not live" in html
+    assert "candidate, unverified" in html
+    assert "Run assessment" in html
+
+
+def test_frontend_results_page(client):
+    res = client.get("/results")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "Assessment Results" in html
+    assert "not a probability" in html
+    assert "based on known factors only" in html
+

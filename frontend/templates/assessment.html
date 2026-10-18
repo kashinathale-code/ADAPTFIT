@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+
+{% block title %}New Assessment – ADAPTFIT{% endblock %}
+
+{% block content %}
+<div class="assessment-page-layout">
+
+  <!-- Header Banner with Demo Notice -->
+  <div class="page-top-banner">
+    <div>
+      <h1 class="page-heading">New Transferability Assessment</h1>
+      <p class="page-subheading">Select reference site (Location A) and prospective site (Location B) to evaluate feasibility.</p>
+    </div>
+    <div class="demo-pill-highlight">
+      <span class="pulse-indicator"></span>
+      <strong>Sample data for demo, not live</strong>
+    </div>
+  </div>
+
+  <div class="assessment-grid">
+
+    <!-- Left Panel: Configuration Form -->
+    <aside class="assessment-form-panel">
+      <form id="assessmentForm" onsubmit="event.preventDefault(); submitAssessment();">
+
+        <!-- Adaptation Selection -->
+        <div class="form-group">
+          <label for="adaptationSelect" class="form-label">
+            Target Adaptation Intervention
+            <span class="badge-status-pill badge-candidate">candidate, unverified</span>
+          </label>
+          <select id="adaptationSelect" class="form-control" required>
+            <option value="rain_garden" selected>Rain Garden (Stormwater Infiltration)</option>
+          </select>
+          <div id="adaptationDesc" class="form-hint">
+            A shallow, vegetated depression that captures and infiltrates stormwater runoff from impervious surfaces.
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Location A (Reference) Card -->
+        <div class="location-card location-card-a">
+          <div class="location-card-header">
+            <div class="location-tag tag-a">Marker A</div>
+            <span class="location-role-title">Reference Location (Proven Site)</span>
+          </div>
+
+          <div class="preset-chips-row">
+            <span class="preset-label">Presets:</span>
+            <button type="button" class="chip" onclick="setPresetLocation('A', 'Pune city', 18.5204, 73.8567)">Pune</button>
+            <button type="button" class="chip" onclick="setPresetLocation('A', 'Nashik city', 19.9975, 73.7898)">Nashik</button>
+            <button type="button" class="chip" onclick="setPresetLocation('A', 'Pimpri', 18.6298, 73.7997)">Pimpri</button>
+          </div>
+
+          <div class="form-group">
+            <label for="locA_name" class="form-label">Location A Name</label>
+            <input type="text" id="locA_name" class="form-control" value="Pune city" placeholder="e.g. Pune Reference Site" required>
+          </div>
+
+          <div class="coords-row">
+            <div class="form-group flex-1">
+              <label for="locA_lat" class="form-label">Latitude</label>
+              <input type="number" step="0.0001" min="-90" max="90" id="locA_lat" class="form-control" value="18.5204" required onchange="onManualCoordChange('A')">
+            </div>
+            <div class="form-group flex-1">
+              <label for="locA_lon" class="form-label">Longitude</label>
+              <input type="number" step="0.0001" min="-180" max="180" id="locA_lon" class="form-control" value="73.8567" required onchange="onManualCoordChange('A')">
+            </div>
+          </div>
+        </div>
+
+        <!-- Location B (Target) Card -->
+        <div class="location-card location-card-b">
+          <div class="location-card-header">
+            <div class="location-tag tag-b">Marker B</div>
+            <span class="location-role-title">Target Location (Candidate Site)</span>
+          </div>
+
+          <div class="preset-chips-row">
+            <span class="preset-label">Presets:</span>
+            <button type="button" class="chip" onclick="setPresetLocation('B', 'Niphad', 20.0800, 74.1100)">Niphad</button>
+            <button type="button" class="chip" onclick="setPresetLocation('B', 'Lonavala', 18.7557, 73.4091)">Lonavala</button>
+            <button type="button" class="chip" onclick="setPresetLocation('B', 'Nashik city', 19.9975, 73.7898)">Nashik</button>
+          </div>
+
+          <div class="form-group">
+            <label for="locB_name" class="form-label">Location B Name</label>
+            <input type="text" id="locB_name" class="form-control" value="Niphad" placeholder="e.g. Niphad Target Site" required>
+          </div>
+
+          <div class="coords-row">
+            <div class="form-group flex-1">
+              <label for="locB_lat" class="form-label">Latitude</label>
+              <input type="number" step="0.0001" min="-90" max="90" id="locB_lat" class="form-control" value="20.0800" required onchange="onManualCoordChange('B')">
+            </div>
+            <div class="form-group flex-1">
+              <label for="locB_lon" class="form-label">Longitude</label>
+              <input type="number" step="0.0001" min="-180" max="180" id="locB_lon" class="form-control" value="74.1100" required onchange="onManualCoordChange('B')">
+            </div>
+          </div>
+        </div>
+
+        <!-- Advanced Factor Override Toggle -->
+        <details class="factors-override-details">
+          <summary class="override-summary">
+            <span>Advanced: Override/Simulate Environmental Values</span>
+            <small class="text-muted">(Optional test values)</small>
+          </summary>
+          <div class="override-body">
+            <p class="override-hint">
+              By default, environmental values are retrieved from the prepared dataset (blank sample values are treated as &ldquo;Unknown&rdquo;). You may simulate exact numbers below to test different screening statuses:
+            </p>
+            <div class="override-grid">
+              <div class="override-col">
+                <strong>Location A (Reference)</strong>
+                <label>Soil Infiltration (mm/hr): <input type="number" step="0.1" id="ov_a_soil" class="form-control-sm" placeholder="Leave blank for dataset"></label>
+                <label>Slope (%): <input type="number" step="0.1" id="ov_a_slope" class="form-control-sm" placeholder="Leave blank for dataset"></label>
+                <label>Annual Rainfall (mm): <input type="number" step="1" id="ov_a_rain" class="form-control-sm" placeholder="Leave blank for dataset"></label>
+                <label>Open Space: <select id="ov_a_space" class="form-control-sm"><option value="">Dataset</option><option value="1">1 (Present)</option><option value="0">0 (Absent)</option></select></label>
+                <label>Building Dist (m): <input type="number" step="0.1" id="ov_a_dist" class="form-control-sm" placeholder="Leave blank for dataset"></label>
+              </div>
+              <div class="override-col">
+                <strong>Location B (Target)</strong>
+                <label>Soil Infiltration (mm/hr): <input type="number" step="0.1" id="ov_b_soil" class="form-control-sm" placeholder="Leave blank for dataset"></label>
+                <label>Slope (%): <input type="number" step="0.1" id="ov_b_slope" class="form-control-sm" placeholder="Leave blank for dataset"></label>
+                <label>Annual Rainfall (mm): <input type="number" step="1" id="ov_b_rain" class="form-control-sm" placeholder="Leave blank for dataset"></label>
+                <label>Open Space: <select id="ov_b_space" class="form-control-sm"><option value="">Dataset</option><option value="1">1 (Present)</option><option value="0">0 (Absent)</option></select></label>
+                <label>Building Dist (m): <input type="number" step="0.1" id="ov_b_dist" class="form-control-sm" placeholder="Leave blank for dataset"></label>
+              </div>
+            </div>
+            <div class="override-actions">
+              <button type="button" class="btn btn-xs" onclick="applyDemoProfile('suitable')">Load Passing Scenario (Suitable)</button>
+              <button type="button" class="btn btn-xs" onclick="applyDemoProfile('unsuitable')">Load Blocker Scenario (Unsuitable)</button>
+              <button type="button" class="btn btn-xs" onclick="clearDemoOverrides()">Clear Overrides</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- Submit Button -->
+        <div class="form-actions">
+          <button type="submit" id="submitAssessmentBtn" class="btn btn-primary btn-block btn-large">
+            <span class="btn-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polygon points="10 8 16 12 10 16 10 8"></polygon>
+              </svg>
+            </span>
+            <span id="btnText">Run assessment</span>
+          </button>
+        </div>
+
+        <div id="formErrorMessage" class="alert alert-error" style="display: none;"></div>
+
+      </form>
+    </aside>
+
+    <!-- Right Side: Leaflet Map & Environmental Preview Table -->
+    <section class="assessment-preview-panel">
+
+      <!-- Leaflet Map Container -->
+      <div class="map-card">
+        <div class="map-card-header">
+          <div class="map-header-left">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+              <line x1="8" y1="2" x2="8" y2="18"></line>
+              <line x1="16" y1="6" x2="16" y2="22"></line>
+            </svg>
+            <strong>Interactive Map Selector</strong>
+          </div>
+          <div class="map-instructions">
+            <span id="mapClickInstruction">Click map to set <strong>Marker A</strong> (Reference), click again for <strong>Marker B</strong> (Target)</span>
+          </div>
+        </div>
+
+        <div id="leafletMap" class="leaflet-map-canvas"></div>
+
+        <div class="map-card-footer">
+          <span class="map-hint">Tip: Click markers on map or drag them to adjust coordinates. Available sample towns are pre-pinned in grey.</span>
+        </div>
+      </div>
+
+      <!-- Environmental Preview Table -->
+      <div class="preview-table-card">
+        <div class="preview-table-header">
+          <div>
+            <h3 class="card-title">Environmental Data Preview</h3>
+            <span class="card-subtitle">Values fetched from sample dataset for selected coordinates.</span>
+          </div>
+          <span class="demo-badge-inline">Sample data for demo, not live</span>
+        </div>
+
+        <div class="table-responsive">
+          <table class="preview-data-table" id="previewTable">
+            <thead>
+              <tr>
+                <th>Factor</th>
+                <th class="col-center">Location A Value</th>
+                <th class="col-center">Location B Value</th>
+                <th>Source</th>
+                <th>Resolution</th>
+                <th>Threshold Rule</th>
+              </tr>
+            </thead>
+            <tbody id="previewTableBody">
+              <!-- Dynamically populated by assessment.js -->
+              <tr>
+                <td><strong>Soil Infiltration</strong></td>
+                <td class="col-center"><span class="badge-unknown">Unknown</span></td>
+                <td class="col-center"><span class="badge-unknown">Unknown</span></td>
+                <td><span class="text-muted">Sample CSV</span></td>
+                <td><span class="text-muted">Unspecified</span></td>
+                <td><span class="rule-tag">min 12.7 mm/hr (critical)</span></td>
+              </tr>
+              <tr>
+                <td><strong>Ground Slope</strong></td>
+                <td class="col-center"><span class="badge-unknown">Unknown</span></td>
+                <td class="col-center"><span class="badge-unknown">Unknown</span></td>
+                <td><span class="text-muted">Sample CSV</span></td>
+                <td><span class="text-muted">Unspecified</span></td>
+                <td><span class="rule-tag">max 8.0 % (critical)</span></td>
+              </tr>
+              <tr>
+                <td><strong>Annual Rainfall</strong></td>
+                <td class="col-center"><span class="badge-unknown">Unknown</span></td>
+                <td class="col-center"><span class="badge-unknown">Unknown</span></td>
+                <td><span class="text-muted">Sample CSV</span></td>
+                <td><span class="text-muted">Unspecified</span></td>
+                <td><span class="rule-tag">600 &ndash; 2500 mm/yr</span></td>
+              </tr>
+              <tr>
+                <td><strong>Open Space</strong></td>
+                <td class="col-center"><span class="badge-unknown">Unknown</span></td>
+                <td class="col-center"><span class="badge-unknown">Unknown</span></td>
+                <td><span class="text-muted">Sample CSV</span></td>
+                <td><span class="text-muted">Unspecified</span></td>
+                <td><span class="rule-tag">Present (binary)</span></td>
+              </tr>
+              <tr>
+                <td><strong>Building Distance</strong></td>
+                <td class="col-center"><span class="badge-unknown">Unknown</span></td>
+                <td class="col-center"><span class="badge-unknown">Unknown</span></td>
+                <td><span class="text-muted">Sample CSV</span></td>
+                <td><span class="text-muted">Unspecified</span></td>
+                <td><span class="rule-tag">min 3.0 m</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="preview-warnings-container" id="previewWarningsContainer" style="display: none;">
+          <h4>Data Quality &amp; Coverage Warnings</h4>
+          <ul id="previewWarningsList"></ul>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/assessment.js') }}"></script>
+{% endblock %}

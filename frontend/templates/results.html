@@ -1,1 +1,236 @@
-<!-- results.html – placeholder; results table and warnings to be built in Step 3 -->
+{% extends "base.html" %}
+
+{% block title %}Assessment Results – ADAPTFIT{% endblock %}
+
+{% block content %}
+<div class="results-page-wrapper" id="resultsApp" {% if assessment_id %}data-assessment-id="{{ assessment_id }}"{% endif %}>
+
+  <!-- Breadcrumbs & Actions -->
+  <div class="results-nav-bar">
+    <div class="results-nav-left">
+      <a href="{{ url_for('new_assessment_page') }}" class="back-link">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        Back to New Assessment
+      </a>
+      <span class="nav-sep">/</span>
+      <span class="current-assessment-label" id="assessmentTitle">Assessment Results</span>
+    </div>
+    <div class="results-nav-right">
+      <span class="demo-pill-highlight">
+        <span class="pulse-indicator"></span>
+        Sample data for demo, not live
+      </span>
+      <a href="{{ url_for('new_assessment_page') }}" class="btn btn-primary btn-sm">
+        Run Another Assessment
+      </a>
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div id="loadingState" class="results-loading-card">
+    <div class="spinner"></div>
+    <h3>Loading Assessment Data...</h3>
+    <p>Retrieving factor results and screening evaluation from SQLite.</p>
+  </div>
+
+  <!-- Error / Empty State -->
+  <div id="errorState" class="results-empty-card" style="display: none;">
+    <div class="empty-icon">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+    </div>
+    <h2 id="errorMessage">No Assessment Selected</h2>
+    <p id="errorSubtitle">Please run an assessment first or provide an assessment ID in the URL (e.g. <code>?id=1</code>).</p>
+    <a href="{{ url_for('new_assessment_page') }}" class="btn btn-primary">Start New Assessment</a>
+  </div>
+
+  <!-- Main Results Display -->
+  <div id="resultsContent" style="display: none;">
+
+    <!-- 1. Large Status Banner -->
+    <section id="statusBanner" class="status-banner status-insufficient">
+      <div class="status-banner-content">
+        <div class="status-icon-wrapper" id="statusIcon">
+          <!-- Dynamically populated SVG -->
+        </div>
+        <div class="status-text-content">
+          <div class="status-badge-row">
+            <span class="status-badge-title" id="statusText">INSUFFICIENT DATA</span>
+            <span class="status-badge-sub" id="adaptationTag">Rain Garden Assessment</span>
+          </div>
+          <h1 class="status-headline" id="statusHeadline">Data Gaps Prevent Comprehensive Screening</h1>
+          <p class="status-explanation" id="statusExplanation">
+            One or more critical parameters are missing for Location B or data coverage is inadequate. A reliable compatibility classification cannot be forced.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Location Overview & Screening Score Grid -->
+    <div class="results-overview-grid">
+
+      <!-- Location Pair Card -->
+      <div class="overview-card">
+        <h3 class="overview-title">Assessed Locations</h3>
+        <div class="location-pair-display">
+          <div class="loc-col">
+            <span class="loc-col-tag tag-a">Reference Site (A)</span>
+            <strong class="loc-name" id="locAName">Location A</strong>
+            <span class="loc-coords" id="locACoords">Lat: --, Lon: --</span>
+          </div>
+          <div class="loc-arrow">&rarr;</div>
+          <div class="loc-col">
+            <span class="loc-col-tag tag-b">Target Site (B)</span>
+            <strong class="loc-name" id="locBName">Location B</strong>
+            <span class="loc-coords" id="locBCoords">Lat: --, Lon: --</span>
+          </div>
+        </div>
+        <div class="overview-meta">
+          <span id="assessmentIdLabel">Assessment ID: #--</span>
+          <span id="assessmentDateLabel">Evaluated: Just now</span>
+        </div>
+      </div>
+
+      <!-- Screening Score Card -->
+      <div class="overview-card score-card">
+        <h3 class="overview-title">Screening Score</h3>
+        <div class="score-display-wrapper">
+          <div class="score-number-display" id="scoreValueDisplay">--</div>
+          <div class="score-subtext-group">
+            <div class="score-badge-critical">
+              <span class="badge-dot dot-amber"></span>
+              <strong>not a probability</strong>
+            </div>
+            <div class="score-caption">based on known factors only</div>
+          </div>
+        </div>
+        <p class="score-interpretation-text" id="scoreDescription">
+          Calculated as the normalized weighted average of non-missing factors. A high score cannot override an unmet critical blocker.
+        </p>
+      </div>
+
+    </div>
+
+    <!-- 2. Factor Comparison Table -->
+    <section class="results-table-section">
+      <div class="section-card-header">
+        <div>
+          <h2 class="card-title">Factor-by-Factor Evaluation</h2>
+          <p class="card-subtitle">Comparing target site measurements against documented intervention criteria and reference site context.</p>
+        </div>
+        <div class="rule-threshold-pill">
+          Rule thresholds: <strong>candidate, unverified</strong>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="results-factors-table" id="factorsTable">
+          <thead>
+            <tr>
+              <th>Environmental Factor</th>
+              <th class="col-center">Location A (Ref)</th>
+              <th class="col-center">Location B (Target)</th>
+              <th>Documented Requirement</th>
+              <th class="col-center">Evaluation Result</th>
+              <th>Interpretation &amp; Provenance</th>
+            </tr>
+          </thead>
+          <tbody id="factorsTableBody">
+            <!-- Dynamically populated by results.js -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 3. Diagnostic Panels Grid (Limiting, Suggested Checks, Data Quality Warnings) -->
+    <section class="diagnostic-grid">
+
+      <!-- Panel A: Limiting Factors -->
+      <div class="diagnostic-card card-limiting">
+        <div class="diag-header">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <h3>Limiting Factors &amp; Risks</h3>
+        </div>
+        <p class="diag-desc">Factors that are unmet, missing, or show significant divergence from the reference site:</p>
+        <ul class="diag-list list-limiting" id="limitingFactorsList">
+          <li class="empty-list-notice">None identified.</li>
+        </ul>
+      </div>
+
+      <!-- Panel B: Suggested Checks -->
+      <div class="diagnostic-card card-checks">
+        <div class="diag-header">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="9 11 12 14 22 4"></polyline>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+          </svg>
+          <h3>Suggested Field Checks</h3>
+        </div>
+        <p class="diag-desc">Recommended local site investigations before committing engineering funds:</p>
+        <ul class="diag-list list-checks" id="suggestedChecksList">
+          <li class="empty-list-notice">No specific checks required.</li>
+        </ul>
+      </div>
+
+      <!-- Panel C: Data Quality & Provenance Warnings -->
+      <div class="diagnostic-card card-warnings">
+        <div class="diag-header">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          <h3>Data-Quality &amp; Source Warnings</h3>
+        </div>
+        <p class="diag-desc">Caveats concerning spatial resolution, dataset coverage, and unverified data sources:</p>
+        <ul class="diag-list list-warnings" id="dataQualityWarningsList">
+          <li class="empty-list-notice">No data-quality warnings reported.</li>
+        </ul>
+      </div>
+
+    </section>
+
+    <!-- 4. Mandatory PRD Section 13 Disclaimer Box on Results Page -->
+    <section class="results-disclaimer-section">
+      <div class="disclaimer-callout">
+        <div class="disclaimer-callout-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+        </div>
+        <div class="disclaimer-callout-body">
+          <h4 class="disclaimer-callout-title">Required Screening Disclaimer (PRD §13)</h4>
+          <p class="disclaimer-callout-text" id="disclaimerText">
+            &ldquo;ADAPTFIT is a preliminary, explainable decision-support prototype. It compares documented adaptation requirements with available environmental data for reference and target locations. Results depend on data coverage, spatial resolution and the quality of the requirements; they are not a guarantee of implementation success.&rdquo;
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom Actions -->
+    <div class="results-bottom-actions">
+      <a href="{{ url_for('new_assessment_page') }}" class="btn btn-primary btn-large">
+        Configure Another Assessment
+      </a>
+      <a href="{{ url_for('index') }}" class="btn btn-secondary btn-large">
+        Return to Dashboard
+      </a>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/results.js') }}"></script>
+{% endblock %}

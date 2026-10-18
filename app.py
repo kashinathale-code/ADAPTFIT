@@ -11,7 +11,7 @@ import os
 import sqlite3
 from typing import Any, Dict, Optional
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, render_template
 
 from backend.routes import api_bp
 from config import Config
@@ -54,19 +54,19 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
 
     @app.route("/")
     def index():
-        return jsonify(
-            {
-                "name": "ADAPTFIT API",
-                "version": "0.2.0",
-                "status": "online",
-                "endpoints": [
-                    "GET /api/adaptations",
-                    "GET /api/location-data?lat=&lon=",
-                    "POST /api/assessments",
-                    "GET /api/assessments/<id>",
-                ],
-            }
-        )
+        """Dashboard page."""
+        return render_template("index.html")
+
+    @app.route("/new")
+    def new_assessment_page():
+        """New Assessment page with Leaflet map and preview table."""
+        return render_template("assessment.html")
+
+    @app.route("/results")
+    @app.route("/results/<int:assessment_id>")
+    def results_page(assessment_id: Optional[int] = None):
+        """Assessment Results page."""
+        return render_template("results.html", assessment_id=assessment_id)
 
     return app
 

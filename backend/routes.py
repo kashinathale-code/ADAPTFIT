@@ -339,6 +339,26 @@ def create_assessment():
     # Response strictly matching TRD Section 7
     response_body = {
         "assessment_id": assessment_id,
+        "reference_location": {
+            "name": ref_name,
+            "latitude": ref_lat,
+            "longitude": ref_lon,
+        },
+        "target_location": {
+            "name": tgt_name,
+            "latitude": tgt_lat,
+            "longitude": tgt_lon,
+        },
+        "location_a": {
+            "name": ref_name,
+            "latitude": ref_lat,
+            "longitude": ref_lon,
+        },
+        "location_b": {
+            "name": tgt_name,
+            "latitude": tgt_lat,
+            "longitude": tgt_lon,
+        },
         "status": assessment_res.status,
         "score": round(assessment_res.score, 2) if assessment_res.score is not None else None,
         "factors": factors_payload,
@@ -444,8 +464,26 @@ def get_assessment(assessment_id: int):
     response_body = {
         "assessment_id": row["id"],
         "adaptation_id": row["adaptation_id"],
-        "reference_location": {"name": row["a_name"], "latitude": row["a_lat"], "longitude": row["a_lon"]},
-        "target_location": {"name": row["b_name"], "latitude": row["b_lat"], "longitude": row["b_lon"]},
+        "reference_location": {
+            "name": row["a_name"],
+            "latitude": float(row["a_lat"]) if row["a_lat"] is not None else None,
+            "longitude": float(row["a_lon"]) if row["a_lon"] is not None else None,
+        },
+        "target_location": {
+            "name": row["b_name"],
+            "latitude": float(row["b_lat"]) if row["b_lat"] is not None else None,
+            "longitude": float(row["b_lon"]) if row["b_lon"] is not None else None,
+        },
+        "location_a": {
+            "name": row["a_name"],
+            "latitude": float(row["a_lat"]) if row["a_lat"] is not None else None,
+            "longitude": float(row["a_lon"]) if row["a_lon"] is not None else None,
+        },
+        "location_b": {
+            "name": row["b_name"],
+            "latitude": float(row["b_lat"]) if row["b_lat"] is not None else None,
+            "longitude": float(row["b_lon"]) if row["b_lon"] is not None else None,
+        },
         "status": row["status"],
         "score": round(row["score"], 2) if row["score"] is not None else None,
         "factors": factors_payload,

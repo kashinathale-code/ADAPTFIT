@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}ADAPTFIT – Climate Adaptation Transferability{% endblock %}</title>
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+  <!-- Dark Green Header -->
+  <header class="topbar">
+    <div class="topbar-container">
+      <div class="brand">
+        <a href="{{ url_for('index') }}" class="brand-link">
+          <div class="brand-logo">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a10 10 0 0 0-7.07 17.07L12 22l7.07-2.93A10 10 0 0 0 12 2z"></path>
+              <path d="M12 6v8"></path>
+              <path d="M8 10l4-4 4 4"></path>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-name">ADAPTFIT</span>
+            <span class="brand-tagline">Right adaptation. Right place.</span>
+          </div>
+        </a>
+      </div>
+
+      <nav class="nav-links">
+        <a href="{{ url_for('index') }}" class="nav-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
+        <a href="{{ url_for('new_assessment_page') }}" class="nav-link {% if request.path == '/new' %}active{% endif %}">New Assessment</a>
+        <a href="{{ url_for('results_page') }}" class="nav-link {% if request.path.startswith('/results') %}active{% endif %}">Results</a>
+      </nav>
+
+      <div class="demo-badge-header">
+        <span class="badge-dot"></span>
+        <span>Sample data for demo, not live</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Global Footer -->
+  <footer class="site-footer">
+    <div class="footer-container">
+      <div class="footer-disclaimer-box">
+        <div class="footer-disclaimer-header">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <strong>Required Disclaimer (PRD §13)</strong>
+        </div>
+        <p class="footer-disclaimer-text">
+          ADAPTFIT is a preliminary, explainable decision-support prototype. It compares documented adaptation requirements with available environmental data for reference and target locations. Results depend on data coverage, spatial resolution and the quality of the requirements; they are not a guarantee of implementation success.
+        </p>
+      </div>
+      <div class="footer-meta">
+        <span>ADAPTFIT Prototype &bull; Decision Support for Climate Adaptation Transferability</span>
+        <span class="footer-notice">All threshold rules are <span class="badge-inline">candidate, unverified</span></span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>
