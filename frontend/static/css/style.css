@@ -1602,3 +1602,13 @@ body {
   color: #64748b;
   font-weight: 500;
 }
+
+.demo-badge-header.mixed-live {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #a7f3d0;
+}
+
+.demo-badge-header.mixed-live .badge-dot {
+  background-color: #10b981;
+}

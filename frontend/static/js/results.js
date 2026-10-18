@@ -119,6 +119,15 @@ function renderAssessment(data) {
   // 1. Status Banner
   renderStatusBanner(data.status);
 
+  // Update header badge based on whether live rainfall was used
+  const liveUsed = Boolean(
+    data.live_rainfall_used ||
+    (data.factors && data.factors.some(f =>
+      (f.factor === "annual_rainfall" && ((f.source && f.source.includes("Live")) || (f.a_source && f.a_source.includes("Live")) || (f.b_source && f.b_source.includes("Live"))))
+    ))
+  );
+  updateHeaderDataBadge(liveUsed);
+
   // 2. Screening Score
   renderScore(data.score, data.status);
 
@@ -319,4 +328,39 @@ function renderListPanel(elementId, items, emptyText) {
 function escapeHtml(str) {
   if (!str) return "";
   return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
+}
+
+function updateHeaderDataBadge(liveUsed) {
+  const badgeText = document.getElementById("headerBadgeText");
+  const badgeContainer = document.getElementById("headerDataBadge") || document.querySelector(".demo-badge-header");
+  const text = liveUsed
+    ? "Mixed data: rainfall live (NASA POWER), other values demo"
+    : "Sample data for demo, not live";
+
+  if (badgeText) {
+    badgeText.textContent = text;
+  } else if (badgeContainer) {
+    const span = badgeContainer.querySelector("span:not(.badge-dot)");
+    if (span) span.textContent = text;
+  }
+
+  if (badgeContainer) {
+    if (liveUsed) {
+      badgeContainer.classList.add("mixed-live");
+    } else {
+      badgeContainer.classList.remove("mixed-live");
+    }
+  }
+
+  // Also update page-level demo pill badges
+  const bannerBadges = document.querySelectorAll(".demo-pill-highlight, .demo-badge-inline");
+  bannerBadges.forEach(b => {
+    const strong = b.querySelector("strong");
+    if (strong) {
+      strong.textContent = text;
+    } else {
+      const span = b.querySelector("span:not(.pulse-indicator)");
+      if (span) span.textContent = text;
+    }
+  });
 }

@@ -287,6 +287,11 @@ function renderPreviewTable(dataA, dataB) {
     tbody.appendChild(row);
   });
 
+  // Update header badge based on whether live rainfall was used
+  const aLive = Boolean(dataA && (dataA.live_rainfall_used || (dataA.factors && dataA.factors.annual_rainfall && dataA.factors.annual_rainfall.source && dataA.factors.annual_rainfall.source.includes("Live"))));
+  const bLive = Boolean(dataB && (dataB.live_rainfall_used || (dataB.factors && dataB.factors.annual_rainfall && dataB.factors.annual_rainfall.source && dataB.factors.annual_rainfall.source.includes("Live"))));
+  updateHeaderDataBadge(aLive || bLive);
+
   // Render combined warnings if any
   const warningsList = document.getElementById("previewWarningsList");
   const warningsContainer = document.getElementById("previewWarningsContainer");
@@ -300,6 +305,41 @@ function renderPreviewTable(dataA, dataB) {
       warningsContainer.style.display = "none";
     }
   }
+}
+
+function updateHeaderDataBadge(liveUsed) {
+  const badgeText = document.getElementById("headerBadgeText");
+  const badgeContainer = document.getElementById("headerDataBadge") || document.querySelector(".demo-badge-header");
+  const text = liveUsed
+    ? "Mixed data: rainfall live (NASA POWER), other values demo"
+    : "Sample data for demo, not live";
+
+  if (badgeText) {
+    badgeText.textContent = text;
+  } else if (badgeContainer) {
+    const span = badgeContainer.querySelector("span:not(.badge-dot)");
+    if (span) span.textContent = text;
+  }
+
+  if (badgeContainer) {
+    if (liveUsed) {
+      badgeContainer.classList.add("mixed-live");
+    } else {
+      badgeContainer.classList.remove("mixed-live");
+    }
+  }
+
+  // Also update page-level demo pill badges
+  const bannerBadges = document.querySelectorAll(".demo-pill-highlight, .demo-badge-inline");
+  bannerBadges.forEach(b => {
+    const strong = b.querySelector("strong");
+    if (strong) {
+      strong.textContent = text;
+    } else {
+      const span = b.querySelector("span:not(.pulse-indicator)");
+      if (span) span.textContent = text;
+    }
+  });
 }
 
 function formatValBadge(val, unit) {

@@ -41,9 +41,9 @@
         <a href="{{ url_for('results_page') }}" class="nav-link {% if request.path.startswith('/results') %}active{% endif %}">Results</a>
       </nav>
 
-      <div class="demo-badge-header">
-        <span class="badge-dot"></span>
-        <span>Sample data for demo, not live</span>
+      <div class="demo-badge-header" id="headerDataBadge">
+        <span class="badge-dot" id="headerBadgeDot"></span>
+        <span id="headerBadgeText">Sample data for demo, not live</span>
       </div>
     </div>
   </header>

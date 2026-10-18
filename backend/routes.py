@@ -119,6 +119,7 @@ def get_location_data():
         "distance_km": data.get("distance_km"),
         "factors": factors_payload,
         "data_quality_warnings": all_warnings,
+        "live_rainfall_used": data.get("live_rainfall_used", False),
     }
     return jsonify(response_payload), 200
 
@@ -372,6 +373,11 @@ def create_assessment():
         "suggested_checks": assessment_res.suggested_checks,
         "data_quality_warnings": combined_warnings,
         "disclaimer": assessment_res.disclaimer,
+        "live_rainfall_used": bool(
+            fetched_a.get("live_rainfall_used")
+            or fetched_b.get("live_rainfall_used")
+            or any((f.get("source") == "Live: NASA POWER" or f.get("b_source") == "Live: NASA POWER" or f.get("a_source") == "Live: NASA POWER") for f in factors_payload)
+        ),
     }
     return jsonify(response_body), 201
 
@@ -513,5 +519,10 @@ def get_assessment(assessment_id: int):
         "data_quality_warnings": [],
         "disclaimer": DISCLAIMER,
         "created_at": row["created_at"],
+        "live_rainfall_used": bool(
+            a_env.get("live_rainfall_used")
+            or b_env.get("live_rainfall_used")
+            or any((f.get("source") == "Live: NASA POWER" or f.get("b_source") == "Live: NASA POWER" or f.get("a_source") == "Live: NASA POWER") for f in factors_payload)
+        ),
     }
     return jsonify(response_body), 200

@@ -450,6 +450,7 @@ def fetch_location_environmental_data(
         )
 
     # If live rainfall flag is enabled: fetch NASA POWER for annual_rainfall
+    live_rainfall_used = False
     if use_live_rainfall:
         live_val, live_meta, live_warn = fetch_nasa_power_rainfall(
             lat=lat,
@@ -462,6 +463,7 @@ def fetch_location_environmental_data(
         if live_val is not None and live_meta is not None:
             values["annual_rainfall"] = live_val
             metadata["annual_rainfall"] = live_meta
+            live_rainfall_used = True
         else:
             # Fallback to CSV value (already in values["annual_rainfall"])
             if live_warn:
@@ -478,4 +480,5 @@ def fetch_location_environmental_data(
         "values": values,
         "metadata": metadata,
         "warnings": warnings,
+        "live_rainfall_used": live_rainfall_used,
     }

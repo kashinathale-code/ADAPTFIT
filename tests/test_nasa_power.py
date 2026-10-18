@@ -281,3 +281,37 @@ def test_flask_api_assessments_with_live_rainfall(tmp_path):
             assert "0.5°" in factors["annual_rainfall"]["resolution"]
             assert factors["slope"]["source"] == DEMO_SOURCE
             assert factors["soil_infiltration"]["source"] == DEMO_SOURCE
+            assert data["live_rainfall_used"] is True
+
+
+def test_header_badge_data_dependence(tmp_path):
+    """
+    Verify header badge and live_rainfall_used flag depend on the data:
+    - If flag is off: live_rainfall_used is False.
+    - If flag is on and live rainfall used: live_rainfall_used is True.
+    - If flag is on but API fails (timeout/error): live_rainfall_used is False.
+    """
+    test_db_path = str(tmp_path / "badge_test.db")
+
+    # 1. Flag off -> live_rainfall_used is False
+    app_off = create_app({"DATABASE_PATH": test_db_path, "USE_LIVE_RAINFALL": False, "TESTING": True})
+    with app_off.test_client() as client:
+        res = client.get("/api/location-data?lat=18.5204&lon=73.8567")
+        assert res.status_code == 200
+        assert res.get_json()["live_rainfall_used"] is False
+
+    # 2. Flag on + live success -> live_rainfall_used is True
+    app_on = create_app({"DATABASE_PATH": test_db_path, "USE_LIVE_RAINFALL": True, "TESTING": True})
+    with patch("requests.get", return_value=_mock_nasa_response(2.5)):
+        with app_on.test_client() as client:
+            res = client.get("/api/location-data?lat=18.5204&lon=73.8567")
+            assert res.status_code == 200
+            assert res.get_json()["live_rainfall_used"] is True
+
+    # 3. Flag on + API failure -> live_rainfall_used is False (falls back to demo data)
+    with patch("requests.get", side_effect=requests.exceptions.Timeout("Timed out")):
+        with app_on.test_client() as client:
+            res = client.get("/api/location-data?lat=19.9975&lon=73.7898")
+            assert res.status_code == 200
+            assert res.get_json()["live_rainfall_used"] is False
+
