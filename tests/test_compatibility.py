@@ -440,6 +440,15 @@ class TestLocationAUnknownWarning:
             for w in result.data_quality_warnings
         )
 
+    def test_location_a_none_b_known_generates_warning_for_any_factor(self, reqs, cfg):
+        profile_a = {**_PROFILE_A_GOOD, "open_space": None}
+        result = assess(reqs, profile_a, _PROFILE_B_GOOD, cfg)
+        expected = (
+            "Open Space reference value for Location A is unknown, "
+            "so transfer risk could not be checked."
+        )
+        assert expected in result.data_quality_warnings
+
 
 # =========================================================================== #
 # TC-8  Explicit tolerance_type ('relative', 'absolute', None)                #

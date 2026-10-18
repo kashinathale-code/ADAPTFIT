@@ -307,8 +307,8 @@ def assess(
 
         risk = _is_transfer_risk(a, b, req.transfer_tolerance, req.tolerance_type)
 
-        # Warn when A's value is absent and transfer risk could not be evaluated
-        if a is None and b is not None and req.transfer_tolerance is not None:
+        # Warn when Location A's value is None but B's is known
+        if a is None and b is not None:
             label = req.factor.replace("_", " ").title()
             data_quality_warnings.append(
                 f"{label} reference value for Location A is unknown, "
