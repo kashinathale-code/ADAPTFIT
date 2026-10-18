@@ -1,0 +1,149 @@
+# ADAPTFIT: Product Requirements Document (PRD)
+
+**Tagline:** Right Adaptation. Right Place.
+**Version:** 1.0 (MVP)
+**Theme:** AI for Climate Change | Climate Risk Assessment | SDG 13
+**Status:** Draft for student project / hackathon
+
+---
+
+## 1. Product Overview
+
+ADAPTFIT is a web-based decision-support tool that helps users judge whether a climate adaptation that worked in one place (Location A) may be compatible with another place (Location B), and what might need to change.
+
+**Core question:** "A climate adaptation worked in Location A. Could it be appropriate for Location B, and what might need to change?"
+
+ADAPTFIT is a **preliminary, explainable screening prototype**. It is not a guarantee of implementation success and not a replacement for expert or field assessment.
+
+## 2. Problem Statement
+
+- Climate adaptations (rain gardens, permeable pavement, green roofs) are often copied between places because they worked somewhere else.
+- Site conditions (soil, slope, rainfall, land cover, space) differ, so a transfer can fail or waste money.
+- Planners and students lack a simple, transparent way to compare a proven site with a new one against documented requirements.
+
+## 3. Goals and Non-Goals
+
+### Goals
+1. Let a user choose an adaptation, a reference location (A) and a target location (B).
+2. Retrieve and display available environmental data for both, with source, units and resolution.
+3. Compare the target against documented adaptation requirements, and compare A with B to flag transfer risks.
+4. Return a clear status with factor-by-factor explanations.
+5. Be honest about uncertainty: show missing and coarse data, and never force a classification.
+
+### Non-Goals (MVP)
+- Predicting probability of success or using machine learning.
+- Engineering design, cost estimation or regulatory approval.
+- Street-level precision for every variable.
+- User accounts, payments or multi-tenant features.
+
+## 4. Target Users
+
+| User | Need |
+|---|---|
+| Student / researcher | Understand why an adaptation may or may not transfer |
+| Urban planner / NGO officer | Quick screening before detailed study |
+| Judge / evaluator | Clear, explainable demo with visible data sources |
+
+## 5. Core User Flow
+
+1. Open dashboard and click **Start New Assessment**.
+2. Select an adaptation (MVP: Rain Garden fully supported; others later).
+3. Select Location A (search or map click).
+4. Select Location B (search or map click).
+5. Review the **environmental preview** (values, units, source, resolution, date, missing data).
+6. Click **Run Assessment**.
+7. Read the **results**: status, factor comparison, supporting factors, limiting factors, suggested checks.
+8. Optionally save the assessment, compare another target, or export a report.
+
+## 6. Functional Requirements
+
+| ID | Requirement | Priority |
+|---|---|---|
+| FR-1 | List available adaptations from the knowledge base | Must |
+| FR-2 | Select locations by map click (lat/lon) | Must |
+| FR-3 | Select locations by place-name search (geocoding) | Should |
+| FR-4 | Show environmental values with units, source, resolution, date | Must |
+| FR-5 | Explicitly show missing values as "Unknown" | Must |
+| FR-6 | Run rules-based assessment returning one of four statuses | Must |
+| FR-7 | Show factor-by-factor comparison of A, B and requirement | Must |
+| FR-8 | List supporting factors, limiting factors and suggested checks | Must |
+| FR-9 | Show data-quality warnings separately from the compatibility status | Must |
+| FR-10 | Save and retrieve past assessments | Should |
+| FR-11 | Compare multiple target locations | Could |
+| FR-12 | Export PDF report | Could |
+| FR-13 | Draw polygon areas | Could (Phase 3) |
+| FR-14 | Label sample/demo data clearly in the UI | Must |
+
+## 7. Assessment Logic (Product View)
+
+### Statuses
+- **Suitable:** key requirements appear met and no critical blocker is identified.
+- **Conditional:** important factors need verification or modification.
+- **Unsuitable:** a critical documented requirement appears unmet.
+- **Insufficient data:** evidence is inadequate; no classification is forced.
+
+### Decision rules
+1. **Critical blockers override the score.** If any critical factor fails, the status is Unsuitable regardless of weighted score.
+2. **Missing-data rule.** If any critical factor is missing for Location B, or more than 30% of total factor weight is missing, return Insufficient data.
+3. **Role of Location A.** A is the reference profile. For each factor, if B differs from A by more than a defined tolerance, flag it as a **transfer risk**. A's success does not prove B will succeed.
+4. **Weighted score** is a screening indicator only, shown with its limitations, never as a probability of success.
+
+## 8. Rain Garden Starter Criteria (to be validated)
+
+These are candidate criteria. Each needs a cited source and expert review before use in real planning.
+
+| Factor | Check | Critical? | Source (to add) |
+|---|---|---|---|
+| Soil infiltration / texture | Sufficient drainage; else field test | Yes | Municipal stormwater manual |
+| Slope | Within supported range | Yes | Design guidance |
+| Rainfall / runoff context | Matches design objective | No | Local climate data |
+| Land cover / available space | Suitable site appears available | No | Land-cover product |
+| Groundwater, utilities, contamination | Include only if reliable data exists | No | Local records |
+
+## 9. Non-Functional Requirements
+
+- **Transparency:** every result traceable to a rule, value and source.
+- **Honesty:** no invented values; no claims of street-level precision from coarse data.
+- **Performance:** assessment returns in under 5 seconds with cached or prepared data.
+- **Reliability:** sample-data fallback if an external API fails.
+- **Security:** no API keys in frontend code or in the repository.
+- **Usability:** responsive layout; usable on a laptop projector and a phone.
+
+## 10. Success Metrics (MVP)
+
+- A user completes an A-to-B assessment end-to-end without help.
+- Every result shows source, resolution and missing-data warnings.
+- All defined test cases (Section 11 of the TRD) pass.
+- At least 5 to 10 demo locations have verified data.
+- Judges can explain why a result was Suitable, Conditional, Unsuitable or Insufficient.
+
+## 11. Roadmap
+
+| Phase | Scope | Acceptance |
+|---|---|---|
+| 1 MVP | Dashboard, Rain Garden, A/B map selection, prepared data, rule engine, results, warnings | End-to-end assessment works |
+| 2 Data | One real API (e.g. NASA POWER), validation, caching, provenance | App shows retrieved data and explains gaps |
+| 3 Usability | History, compare targets, PDF export, polygon selection | Users can save and compare |
+| 4 Advanced | More regions and adaptations, expert-reviewed rules, climate scenarios, cost/maintenance, possibly ML | Backed by validated data |
+
+## 12. Risks and Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Coarse data resolution | Record resolution; show warnings; avoid precision claims |
+| Missing local variables | Show Unknown; recommend field verification |
+| Unvalidated thresholds | Document source/version; seek expert review |
+| False certainty | Separate data quality from status; state limitations |
+| API outage | Cache responses; keep labelled sample data |
+| Scope creep | Ship one adaptation well before adding others |
+
+## 13. Required Disclaimer
+
+> "ADAPTFIT is a preliminary, explainable decision-support prototype. It compares documented adaptation requirements with available environmental data for reference and target locations. Results depend on data coverage, spatial resolution and the quality of the requirements; they are not a guarantee of implementation success."
+
+## 14. Open Questions
+
+1. Which Rain Garden source documents will be the official rule basis?
+2. What tolerance values define a "transfer risk" between A and B for each factor?
+3. Which 5 to 10 demo locations (e.g. around Nashik) will have verified data?
+4. Which geocoding service will be used for search?

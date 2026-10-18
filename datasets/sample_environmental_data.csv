@@ -1,0 +1,6 @@
+location_name,latitude,longitude,soil_infiltration_mm_hr,soil_source,slope_pct,slope_source,annual_rainfall_mm,rainfall_source,open_space,open_space_source,building_distance_m,building_distance_source
+Sample_A_Nashik,19.9975,73.7898,25.0,illustrative-sample,3.0,illustrative-sample,1100.0,illustrative-sample,1.0,illustrative-sample,5.0,illustrative-sample
+Sample_B_Niphad,20.0800,74.1100,8.0,illustrative-sample,6.0,illustrative-sample,900.0,illustrative-sample,1.0,illustrative-sample,4.0,illustrative-sample
+Sample_C_Igatpuri,19.7000,73.5600,35.0,illustrative-sample,12.0,illustrative-sample,2200.0,illustrative-sample,0.0,illustrative-sample,2.0,illustrative-sample
+Sample_D_Sinnar,19.8500,74.0000,15.0,illustrative-sample,4.5,illustrative-sample,700.0,illustrative-sample,1.0,illustrative-sample,6.0,illustrative-sample
+Sample_E_Dindori,20.2000,73.8400,,,,500.0,illustrative-sample,,,illustrative-sample,,

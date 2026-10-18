@@ -1,0 +1,341 @@
+# ADAPTFIT: Technical Requirements Document (TRD)
+
+**Version:** 1.0 (MVP)
+**Companion to:** ADAPTFIT_PRD.md
+
+---
+
+## 1. Technical Summary
+
+ADAPTFIT is a Flask web application with a plain JavaScript + Leaflet frontend, an SQLite knowledge base, and a transparent rules-based compatibility engine. Heavy geospatial files stay outside the database; only extracted point values are stored.
+
+**Request flow:**
+Browser UI → Flask API → data adapters + SQLite → feature processing → compatibility engine → JSON response → results UI.
+
+## 2. Technology Stack
+
+| Layer | Technology | Role |
+|---|---|---|
+| Frontend | HTML5, CSS3, JavaScript | Pages, forms, API calls, result rendering |
+| Map | Leaflet.js | Tiles, markers, location selection |
+| Backend | Python 3.11+, Flask | Routes, validation, orchestration, JSON API |
+| Data processing | Pandas, NumPy | Cleaning, unit conversion, scoring |
+| Raster access | rasterio (only if reading GeoTIFFs) | Point/window reads from DEM, land cover, soil |
+| Vector/GIS | GeoPandas + GeoJSON (optional for MVP) | Boundaries, vector features |
+| Database | SQLite | Rules, locations, features, assessments |
+| Charts | Chart.js (optional) | Factor comparison visuals |
+| Deployment | Render or similar | Hosting for demo |
+| Testing | pytest | Unit and API tests |
+
+**Notes**
+- GeoPandas does not read rasters; use `rasterio` or REST APIs for raster-derived values.
+- A point-based MVP may not need GeoPandas, which avoids heavy installs on some hosts.
+- Pin all versions in `requirements.txt`.
+
+## 3. Architecture and Responsibilities
+
+| Module | Responsibility |
+|---|---|
+| `app.py` | Create Flask app, register routes, init DB |
+| `config.py` | Settings, env-variable loading |
+| `backend/routes.py` | Validate requests, return JSON |
+| `backend/data_fetcher.py` | Call APIs or load prepared datasets; caching |
+| `backend/data_processor.py` | Clean values, convert units, track missingness |
+| `backend/gis_processor.py` | Coordinates, raster/vector reads, boundary checks |
+| `backend/compatibility_engine.py` | Rules, scoring, status, explanations |
+| `database/schema.sql` | Table definitions and seed rules |
+| `frontend/` | Templates, CSS, `map.js`, `assessment.js` |
+| `tests/` | Data and engine tests |
+
+**Design principle:** each module is independently testable. The engine must run without live APIs; data fetching must run without the UI.
+
+## 4. Project Structure
+
+```
+ADAPTFIT/
+  app.py
+  requirements.txt
+  config.py
+  frontend/
+    templates/ (index.html, results.html)
+    static/css/style.css
+    static/js/map.js
+    static/js/assessment.js
+  backend/
+    routes.py
+    data_fetcher.py
+    data_processor.py
+    gis_processor.py
+    compatibility_engine.py
+  database/
+    schema.sql
+    adaptfit.db
+  datasets/
+    sample_environmental_data.csv
+  tests/
+    test_data.py
+    test_compatibility.py
+```
+
+## 5. Database Design (SQLite)
+
+```sql
+CREATE TABLE adaptations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  evidence_source TEXT
+);
+
+CREATE TABLE adaptation_requirements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  adaptation_id TEXT NOT NULL REFERENCES adaptations(id),
+  factor TEXT NOT NULL,
+  min_value REAL,
+  max_value REAL,
+  unit TEXT,
+  weight REAL NOT NULL CHECK (weight >= 0),
+  is_critical INTEGER NOT NULL DEFAULT 0,
+  transfer_tolerance REAL,        -- max acceptable |B - A| before flagging
+  evidence TEXT,
+  rule_version TEXT
+);
+
+CREATE TABLE locations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  latitude REAL NOT NULL,
+  longitude REAL NOT NULL,
+  boundary_id TEXT
+);
+
+CREATE TABLE environmental_features (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  location_id INTEGER NOT NULL REFERENCES locations(id),
+  factor TEXT NOT NULL,
+  value REAL,                     -- NULL means unknown
+  unit TEXT,
+  source TEXT,
+  resolution TEXT,
+  data_date TEXT,
+  retrieved_at TEXT,
+  transformation TEXT
+);
+
+CREATE TABLE assessments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  adaptation_id TEXT NOT NULL REFERENCES adaptations(id),
+  location_a_id INTEGER NOT NULL REFERENCES locations(id),
+  location_b_id INTEGER NOT NULL REFERENCES locations(id),
+  status TEXT NOT NULL,
+  score REAL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE assessment_factors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_id INTEGER NOT NULL REFERENCES assessments(id),
+  factor TEXT NOT NULL,
+  a_value REAL,
+  b_value REAL,
+  factor_status TEXT,             -- met / unmet / unknown / transfer_risk
+  interpretation TEXT
+);
+```
+
+**Deployment note:** on Render's free tier the filesystem resets on redeploy. Rebuild and seed the database from `schema.sql` on startup, or attach a persistent disk.
+
+## 6. Compatibility Engine Specification
+
+### Inputs
+- Adaptation requirements (list of factors with thresholds, weights, critical flag, tolerance).
+- Environmental profiles for A and B (value or NULL, plus metadata).
+
+### Per-factor evaluation
+For each requirement factor:
+1. If B value is NULL → `unknown`.
+2. Else if B is outside `[min_value, max_value]` → `unmet`.
+3. Else → `met`.
+4. If A and B are both known and `|B − A| > transfer_tolerance` → add `transfer_risk` flag (even if `met`).
+
+### Normalised score
+Each factor gets `s_i` in [0, 1] (1 = well within range, 0 = clearly outside; define the scale per factor).
+
+```
+S = Σ(w_i × s_i) / Σ(w_i)      over factors with known values
+```
+
+S is a preliminary screening indicator, not a probability of success.
+
+### Status decision (evaluated in this order)
+1. **Insufficient data** if any critical factor is unknown for B, or unknown weight / total weight > 0.30.
+2. **Unsuitable** if any critical factor is `unmet`.
+3. **Conditional** if any factor is `unknown`, `unmet` (non-critical), or flagged `transfer_risk`, or S below the suitable threshold.
+4. **Suitable** otherwise.
+
+The suitable threshold (e.g. 0.75) must be documented as a configurable constant.
+
+### Pseudocode
+
+```python
+def assess(requirements, profile_a, profile_b, cfg):
+    results, known_w, unknown_w, total_w = [], 0, 0, 0
+    critical_unknown = critical_unmet = False
+    weighted_sum = 0
+
+    for r in requirements:
+        total_w += r.weight
+        b = profile_b.get(r.factor)
+        a = profile_a.get(r.factor)
+
+        if b is None:
+            status = "unknown"
+            unknown_w += r.weight
+            critical_unknown |= r.is_critical
+        else:
+            status = "met" if in_range(b, r) else "unmet"
+            critical_unmet |= (status == "unmet" and r.is_critical)
+            weighted_sum += r.weight * normalise(b, r)
+            known_w += r.weight
+
+        risk = (a is not None and b is not None and
+                r.transfer_tolerance is not None and
+                abs(b - a) > r.transfer_tolerance)
+        results.append(FactorResult(r.factor, a, b, status, risk))
+
+    if critical_unknown or unknown_w / total_w > cfg.MAX_MISSING_WEIGHT:
+        overall = "insufficient_data"
+    elif critical_unmet:
+        overall = "unsuitable"
+    else:
+        score = weighted_sum / known_w
+        needs_check = any(x.status != "met" or x.risk for x in results)
+        overall = "conditional" if needs_check or score < cfg.SUITABLE_MIN else "suitable"
+
+    return overall, results
+```
+
+### Explanations
+Each factor result produces a plain-language sentence, e.g. "Slope at B is 12%, above the documented maximum of 8% (critical). Verify with a site survey." Include source and resolution in the explanation payload.
+
+## 7. API Specification
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/adaptations` | List interventions |
+| GET | `/api/location-data?lat=&lon=` | Environmental data for a point |
+| POST | `/api/assessments` | Run an assessment |
+| GET | `/api/assessments/{id}` | Retrieve a saved assessment |
+
+### POST `/api/assessments` request
+
+```json
+{
+  "adaptation_id": "rain_garden",
+  "reference_location": {"name": "Location A", "latitude": 19.10, "longitude": 73.00},
+  "target_location": {"name": "Niphad, Nashik", "latitude": 20.08, "longitude": 74.11}
+}
+```
+
+(Coordinates are illustrative.)
+
+### Response
+
+```json
+{
+  "assessment_id": 12,
+  "status": "conditional",
+  "score": 0.68,
+  "factors": [
+    {
+      "factor": "slope",
+      "a_value": 3.0,
+      "b_value": 6.0,
+      "requirement": "max 8 %",
+      "factor_status": "met",
+      "transfer_risk": true,
+      "interpretation": "Within range but differs notably from reference.",
+      "source": "DEM (illustrative)",
+      "resolution": "30 m"
+    }
+  ],
+  "supporting_factors": ["..."],
+  "limiting_factors": ["..."],
+  "suggested_checks": ["..."],
+  "data_quality_warnings": ["Soil data is ~250 m resolution; verify infiltration on site."],
+  "disclaimer": "Preliminary screening, not a guarantee of success."
+}
+```
+
+### Validation rules
+- `adaptation_id` must exist.
+- Latitude in [-90, 90], longitude in [-180, 180].
+- Return `400` with a clear message on invalid input, `404` for unknown IDs, `502` if an upstream data source fails and no cache exists.
+
+## 8. Data Sources and Integration
+
+| Source | Use | MVP approach |
+|---|---|---|
+| NASA POWER | Rainfall / climate | Live point API call, cached |
+| ISRIC SoilGrids | Soil properties | Point API or prepared CSV |
+| DEM (SRTM / Copernicus) | Elevation, slope | Pre-clipped raster or prepared CSV |
+| Sentinel-2 / land cover | Land cover | Prepared derived product, Phase 2 |
+| OpenStreetMap / Overpass | Roads, buildings, land use | Phase 2 |
+
+**Rules**
+- MVP: one live climate source plus a prepared CSV (`sample_environmental_data.csv`) for 5 to 10 locations.
+- Store source, units, resolution, date, retrieval time and transformations for every value.
+- Cache all API responses; set a staleness limit.
+- Never fabricate infiltration, drainage or runoff values; store NULL instead.
+- Keep large rasters on disk, clipped to the study area; store only extracted values in SQLite.
+
+## 9. Security and Configuration
+
+- API keys and secrets live in backend environment variables; never in frontend JS or Git.
+- Add `.env` and `adaptfit.db` to `.gitignore` as appropriate.
+- Use parameterised SQL queries only.
+- Enable CORS only if frontend and backend are on different origins.
+- Rate-limit or cache calls to external APIs to respect provider terms.
+
+## 10. Deployment
+
+- Host on Render (or similar) using Gunicorn: `gunicorn app:app`.
+- Seed the database at startup if the file is missing.
+- Free tiers sleep after inactivity; warm the app before demos.
+- Test deployment early, not the night before.
+- Keep a local fallback demo using sample data.
+
+## 11. Testing Plan
+
+| Test | Expected |
+|---|---|
+| Both locations have complete data | Valid status with all factors explained |
+| A key factor missing for one location | Unknown shown; Insufficient data if critical or >30% weight |
+| Point outside dataset coverage | Clear warning; no invented value |
+| Two locations with similar profiles | No transfer-risk flags |
+| Critical requirement unmet | Unsuitable, even with high score |
+| API failure or stale data | Cached/sample data used with visible warning |
+| Invalid coordinates or adaptation ID | 400 / 404 with message |
+
+**Unit tests:** `tests/test_compatibility.py` (engine, no network) and `tests/test_data.py` (processing, unit conversion, missingness).
+
+## 12. Build Order
+
+1. Write the Rain Garden rule table with citations.
+2. Create `schema.sql` and a seed script.
+3. Build and unit-test `compatibility_engine.py`.
+4. Prepare the sample dataset for 5 to 10 locations.
+5. Build Flask routes (`/api/adaptations`, `/api/assessments`).
+6. Build the Leaflet map and assessment form.
+7. Build the results page with factor table and warnings.
+8. Connect one live data source with caching.
+9. Add history, comparison and export if time allows.
+
+## 13. Definition of Done (MVP)
+
+- End-to-end A-to-B Rain Garden assessment works in the deployed app.
+- All four statuses can be demonstrated with test data.
+- Critical-blocker override and missing-data rule are implemented and tested.
+- Every result displays source, resolution and data-quality warnings.
+- Sample/demo data is clearly labelled in the UI.
+- No secrets in the repository.
