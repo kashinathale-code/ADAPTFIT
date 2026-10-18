@@ -1,6 +1,6 @@
 name,latitude,longitude,annual_rainfall,slope,soil_infiltration,open_space,building_distance,source,resolution,data_date
-Pimpri,18.6298,73.7997,,,,,,,,
-Pune city,18.5204,73.8567,,,,,,,,
-Nashik city,19.9975,73.7898,,,,,,,,
-Niphad,20.0800,74.1100,,,,,,,,
-Lonavala,18.7557,73.4091,,,,,,,,
+Pimpri,18.6298,73.7997,720,2,25,1,8,Illustrative demo value,n/a (demo),2026-10-19
+Pune city,18.5204,73.8567,740,3,22,1,6,Illustrative demo value,n/a (demo),2026-10-19
+Nashik city,19.9975,73.7898,700,4,20,0,5,Illustrative demo value,n/a (demo),2026-10-19
+Niphad,20.0800,74.1100,650,12,18,1,7,Illustrative demo value,n/a (demo),2026-10-19
+Lonavala,18.7557,73.4091,4000,5,,1,10,Illustrative demo value,n/a (demo),2026-10-19
