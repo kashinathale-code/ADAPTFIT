@@ -23,7 +23,7 @@ def test_haversine_distance():
     assert 50.0 < dist < 60.0
 
 
-def test_load_sample_locations_blank_values_are_none():
+def test_load_sample_locations():
     locations = load_sample_locations()
     assert len(locations) >= 5
     names = {loc["name"] for loc in locations}
@@ -33,10 +33,14 @@ def test_load_sample_locations_blank_values_are_none():
     assert "Niphad" in names
     assert "Lonavala" in names
 
-    # All environmental values should be None as per Step 2 instruction
-    for loc in locations:
-        for factor, val in loc["factors"].items():
-            assert val is None, f"Expected None for {factor} at {loc['name']}, got {val}"
+    # Verify that missing values are properly stored as None (e.g. soil_infiltration at Lonavala)
+    lonavala = next(loc for loc in locations if loc["name"] == "Lonavala")
+    assert lonavala["factors"]["soil_infiltration"] is None
+
+    # Verify that present values are parsed as floats
+    pune = next(loc for loc in locations if loc["name"] == "Pune city")
+    assert pune["factors"]["annual_rainfall"] == 740.0
+    assert pune["factors"]["slope"] == 3.0
 
 
 def test_fetch_location_environmental_data_nearest():
@@ -44,8 +48,8 @@ def test_fetch_location_environmental_data_nearest():
     res = fetch_location_environmental_data(18.52, 73.85)
     assert res["matched_sample_location"] == "Pune city"
     assert res["distance_km"] < 2.0
-    for factor, val in res["values"].items():
-        assert val is None
+    assert res["values"]["annual_rainfall"] == 740.0
+    assert res["values"]["slope"] == 3.0
 
 
 def test_fetch_location_environmental_data_outside_coverage():

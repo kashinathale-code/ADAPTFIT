@@ -35,10 +35,12 @@ def test_get_location_data_valid(client):
     assert data["latitude"] == 18.5204
     assert data["longitude"] == 73.8567
     assert "factors" in data
-    # Environmental values in sample dataset are blank, so values are null
+    # Environmental values from sample dataset for Pune city
     for factor in ("annual_rainfall", "slope", "soil_infiltration"):
         assert factor in data["factors"]
-        assert data["factors"][factor]["value"] is None
+        assert data["factors"][factor]["value"] is not None
+        assert "unit" in data["factors"][factor]
+    assert data["factors"]["annual_rainfall"]["value"] == 740.0
 
 
 def test_get_location_data_missing_params(client):
@@ -248,4 +250,20 @@ def test_frontend_results_page(client):
     assert "Assessment Results" in html
     assert "not a probability" in html
     assert "based on known factors only" in html
+
+
+def test_auto_seeding_on_startup_when_db_missing(tmp_path):
+    """Verify database auto-seeding on startup when the database file is missing (TRD §5, §10)."""
+    import os
+    missing_db = str(tmp_path / "autoseed_dir" / "missing.db")
+    assert not os.path.exists(missing_db)
+
+    test_app = create_app({"DATABASE_PATH": missing_db, "TESTING": True})
+    assert os.path.exists(missing_db)
+
+    with test_app.test_client() as tc:
+        res = tc.get("/api/adaptations")
+        assert res.status_code == 200
+        adaptations = res.get_json()
+        assert any(a["id"] == "rain_garden" for a in adaptations)
 

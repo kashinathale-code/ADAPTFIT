@@ -1,5 +1,7 @@
 .env
+*.db
 database/adaptfit.db
+__pycache__
 __pycache__/
 *.pyc
 *.pyo

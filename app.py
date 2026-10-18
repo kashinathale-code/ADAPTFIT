@@ -32,10 +32,11 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
     if test_config:
         app.config.update(test_config)
 
-    # Ensure database exists and is seeded
+    # Ensure database exists and is seeded on startup if missing or uninitialized
     db_path = app.config.get("DATABASE_PATH", Config.DATABASE_PATH)
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     if not os.path.exists(db_path):
+        app.logger.info("Database file not found at %s. Auto-seeding database on startup...", db_path)
         seed(db_path=db_path)
     else:
         # Validate that adaptations table is present
@@ -47,6 +48,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         has_table = cur.fetchone()[0] > 0
         conn.close()
         if not has_table:
+            app.logger.info("Database at %s lacks required schema. Auto-seeding database on startup...", db_path)
             seed(db_path=db_path, force=True)
 
     # Register blueprints
