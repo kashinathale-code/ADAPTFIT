@@ -11,8 +11,10 @@ import os
 class Config:
     # ------------------------------------------------------------------ #
     # Database                                                             #
-    # ------------------------------------------------------------------ #
-    DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "database/adaptfit.db")
+    DATABASE_PATH: str = os.environ.get(
+        "DATABASE_PATH",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "database", "adaptfit.db"),
+    )
 
     # ------------------------------------------------------------------ #
     # Compatibility engine thresholds                                      #
