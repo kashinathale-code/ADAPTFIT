@@ -232,8 +232,22 @@ function renderFactorsTable(factors) {
 
   factors.forEach(f => {
     const label = f.factor.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-    const valA = f.a_value !== null ? f.a_value : `<span class="badge-unknown">Unknown</span>`;
-    const valB = f.b_value !== null ? f.b_value : `<span class="badge-unknown">Unknown</span>`;
+
+    const srcA = f.a_source || (f.a_value !== null ? (f.source || "Demo value") : "");
+    const resA = f.a_resolution || (f.a_value !== null ? (f.resolution || "n/a (demo)") : "");
+    const srcB = f.b_source || f.source || "Demo value";
+    const resB = f.b_resolution || f.resolution || "n/a (demo)";
+
+    const isLiveA = srcA && srcA.includes("Live");
+    const isLiveB = srcB && srcB.includes("Live");
+    const labelA = isLiveA ? "Live: NASA POWER" : "Demo value";
+    const labelB = isLiveB ? "Live: NASA POWER" : "Demo value";
+
+    const subA = (f.a_value !== null && srcA) ? `<div class="preview-val-prov ${isLiveA ? 'badge-provenance-live' : 'badge-provenance-demo'}">${escapeHtml(labelA)} &bull; ${escapeHtml(resA)}</div>` : "";
+    const subB = (f.b_value !== null && srcB) ? `<div class="preview-val-prov ${isLiveB ? 'badge-provenance-live' : 'badge-provenance-demo'}">${escapeHtml(labelB)} &bull; ${escapeHtml(resB)}</div>` : "";
+
+    const valA = f.a_value !== null ? `<div><strong>${f.a_value}</strong></div>${subA}` : `<span class="badge-unknown">Unknown</span>`;
+    const valB = f.b_value !== null ? `<div><strong>${f.b_value}</strong></div>${subB}` : `<span class="badge-unknown">Unknown</span>`;
 
     // Status pill
     let statusBadge = "";
@@ -252,10 +266,10 @@ function renderFactorsTable(factors) {
     }
 
     // Provenance (source / resolution)
-    let prov = "";
-    if (f.source || f.resolution) {
-      prov = `<div class="table-prov-text">Source: ${escapeHtml(f.source || 'Sample dataset')} &bull; Res: ${escapeHtml(f.resolution || 'Unspecified')}</div>`;
-    }
+    const isLive = isLiveB || isLiveA;
+    const displaySrc = isLive ? "Live: NASA POWER" : "Demo value";
+    const displayRes = isLive ? (isLiveB ? resB : resA) : (f.resolution || "n/a (demo)");
+    const prov = `<div class="table-prov-text">Source: ${escapeHtml(displaySrc)} &bull; Res: ${escapeHtml(displayRes)}</div>`;
 
     const row = document.createElement("tr");
     row.innerHTML = `

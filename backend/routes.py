@@ -319,6 +319,7 @@ def create_assessment():
         )
 
         b_meta = meta_b.get(fr.factor, {})
+        a_meta_item = meta_a.get(fr.factor, {})
         factors_payload.append(
             {
                 "factor": fr.factor,
@@ -328,8 +329,12 @@ def create_assessment():
                 "factor_status": fr.factor_status,
                 "transfer_risk": fr.transfer_risk,
                 "interpretation": fr.interpretation,
-                "source": b_meta.get("source"),
-                "resolution": b_meta.get("resolution"),
+                "source": b_meta.get("source") or "Demo value",
+                "resolution": b_meta.get("resolution") or "n/a (demo)",
+                "a_source": a_meta_item.get("source") or "Demo value",
+                "a_resolution": a_meta_item.get("resolution") or "n/a (demo)",
+                "b_source": b_meta.get("source") or "Demo value",
+                "b_resolution": b_meta.get("resolution") or "n/a (demo)",
             }
         )
 
@@ -425,6 +430,14 @@ def get_assessment(assessment_id: int):
     supporting: List[str] = []
     limiting: List[str] = []
 
+    a_lat = float(row["a_lat"]) if row["a_lat"] is not None else None
+    a_lon = float(row["a_lon"]) if row["a_lon"] is not None else None
+    b_lat = float(row["b_lat"]) if row["b_lat"] is not None else None
+    b_lon = float(row["b_lon"]) if row["b_lon"] is not None else None
+
+    a_env = fetch_location_environmental_data(a_lat, a_lon, name=row["a_name"]) if a_lat is not None and a_lon is not None else {"metadata": {}}
+    b_env = fetch_location_environmental_data(b_lat, b_lon, name=row["b_name"]) if b_lat is not None and b_lon is not None else {"metadata": {}}
+
     for fr in factor_rows:
         req_meta = req_rows.get(fr["factor"])
         req_summary = ""
@@ -446,6 +459,9 @@ def get_assessment(assessment_id: int):
         if status in ("unmet", "unknown") or is_risk:
             limiting.append(fr["factor"])
 
+        b_meta = b_env.get("metadata", {}).get(fr["factor"], {})
+        a_meta = a_env.get("metadata", {}).get(fr["factor"], {})
+
         factors_payload.append(
             {
                 "factor": fr["factor"],
@@ -455,8 +471,12 @@ def get_assessment(assessment_id: int):
                 "factor_status": status,
                 "transfer_risk": is_risk,
                 "interpretation": fr["interpretation"],
-                "source": None,
-                "resolution": None,
+                "source": b_meta.get("source") or "Demo value",
+                "resolution": b_meta.get("resolution") or "n/a (demo)",
+                "a_source": a_meta.get("source") or "Demo value",
+                "a_resolution": a_meta.get("resolution") or "n/a (demo)",
+                "b_source": b_meta.get("source") or "Demo value",
+                "b_resolution": b_meta.get("resolution") or "n/a (demo)",
             }
         )
 

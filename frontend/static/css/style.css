@@ -1585,3 +1585,20 @@ body {
   padding: 2px 6px;
   border-radius: 4px;
 }
+
+/* Provenance per-value subtext */
+.preview-val-prov {
+  font-size: 0.72rem;
+  margin-top: 3px;
+  line-height: 1.25;
+}
+
+.badge-provenance-live {
+  color: #059669;
+  font-weight: 600;
+}
+
+.badge-provenance-demo {
+  color: #64748b;
+  font-weight: 500;
+}

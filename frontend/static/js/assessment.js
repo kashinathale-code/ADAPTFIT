@@ -252,17 +252,36 @@ function renderPreviewTable(dataA, dataB) {
     const valA = ovA !== null ? ovA : (aFactor ? aFactor.value : null);
     const valB = ovB !== null ? ovB : (bFactor ? bFactor.value : null);
 
-    const unit = (bFactor && bFactor.unit) ? bFactor.unit : "";
-    const source = (bFactor && bFactor.source) ? bFactor.source : (aFactor && aFactor.source ? aFactor.source : "Sample CSV");
-    const resolution = (bFactor && bFactor.resolution) ? bFactor.resolution : (aFactor && aFactor.resolution ? aFactor.resolution : "Unspecified");
+    const unit = (bFactor && bFactor.unit) ? bFactor.unit : ((aFactor && aFactor.unit) ? aFactor.unit : "");
+    const srcA = (aFactor && aFactor.source) ? aFactor.source : "Demo value";
+    const srcB = (bFactor && bFactor.source) ? bFactor.source : "Demo value";
+    const resA = (aFactor && aFactor.resolution) ? aFactor.resolution : "n/a (demo)";
+    const resB = (bFactor && bFactor.resolution) ? bFactor.resolution : "n/a (demo)";
+
+    const isLiveA = srcA && srcA.includes("Live");
+    const isLiveB = srcB && srcB.includes("Live");
+    const labelA = isLiveA ? "Live: NASA POWER" : "Demo value";
+    const labelB = isLiveB ? "Live: NASA POWER" : "Demo value";
+
+    const badgeA = valA !== null
+      ? `<div><strong>${valA}</strong> <small class="text-muted">${unit}</small></div><div class="preview-val-prov ${isLiveA ? 'badge-provenance-live' : 'badge-provenance-demo'}">${escapeHtml(labelA)} &bull; ${escapeHtml(resA)}</div>`
+      : `<span class="badge-unknown">Unknown</span>`;
+
+    const badgeB = valB !== null
+      ? `<div><strong>${valB}</strong> <small class="text-muted">${unit}</small></div><div class="preview-val-prov ${isLiveB ? 'badge-provenance-live' : 'badge-provenance-demo'}">${escapeHtml(labelB)} &bull; ${escapeHtml(resB)}</div>`
+      : `<span class="badge-unknown">Unknown</span>`;
+
+    const isLive = isLiveB || isLiveA;
+    const displaySource = isLive ? "Live: NASA POWER" : "Demo value";
+    const displayRes = isLive ? (isLiveB ? resB : resA) : "n/a (demo)";
 
     const row = document.createElement("tr");
     row.innerHTML = `
       <td><strong>${cfg.label}</strong></td>
-      <td class="col-center">${formatValBadge(valA, unit)}</td>
-      <td class="col-center">${formatValBadge(valB, unit)}</td>
-      <td><span class="text-muted">${escapeHtml(source)}</span></td>
-      <td><span class="text-muted">${escapeHtml(resolution)}</span></td>
+      <td class="col-center">${badgeA}</td>
+      <td class="col-center">${badgeB}</td>
+      <td><span class="${isLive ? 'badge-provenance-live' : 'text-muted'}">${escapeHtml(displaySource)}</span></td>
+      <td><span class="text-muted">${escapeHtml(displayRes)}</span></td>
       <td><span class="rule-tag">${cfg.rule}</span></td>
     `;
     tbody.appendChild(row);

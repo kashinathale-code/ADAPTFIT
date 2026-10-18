@@ -26,6 +26,11 @@ class Config:
     # ^ per TRD §6: unknown_weight / total_weight > 0.30 → Insufficient data
 
     # ------------------------------------------------------------------ #
+    # Live data flags                                                      #
+    # ------------------------------------------------------------------ #
+    USE_LIVE_RAINFALL: bool = os.environ.get("USE_LIVE_RAINFALL", "false").lower() == "true"
+
+    # ------------------------------------------------------------------ #
     # External API keys – loaded from env, never committed                #
     # ------------------------------------------------------------------ #
     NASA_POWER_API_KEY: str = os.environ.get("NASA_POWER_API_KEY", "")
