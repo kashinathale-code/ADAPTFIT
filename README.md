@@ -185,24 +185,26 @@ Render's free tier spins down containers after inactivity and uses an ephemeral 
 
 ## Demonstrating the Four Assessment Statuses
 
-ADAPTFIT comes with built-in sample locations in Western Maharashtra (`datasets/sample_environmental_data.csv`) to demonstrate every engine outcome:
+ADAPTFIT comes with built-in sample locations in Western Maharashtra (`datasets/sample_environmental_data.csv`) and one-click override presets to demonstrate every engine outcome in under a minute (documented in detail in `docs/DEMO_RESULTS.md`):
 
 1. **Suitable (Green):**
    - **Reference (A):** Pune city (`18.5204, 73.8567`)
    - **Target (B):** Pimpri (`18.6298, 73.7997`)
-   - *Outcome:* Infiltration (25 mm/hr) and slope (2%) satisfy requirements, and rainfall (720 vs 740 mm/yr) is within transfer tolerance. Overall score > 0.75.
+   - *Outcome:* Infiltration (25 mm/hr) and slope (2% in CSV, 0.7% in live DEM) satisfy requirements, and rainfall is within transfer tolerance. Overall score $\ge 0.75$.
 2. **Unsuitable (Red - Critical Blocker):**
-   - **Reference (A):** Pune city (`18.5204, 73.8567`)
-   - **Target (B):** Niphad (`20.0800, 74.1100`)
-   - *Outcome:* Slope at Niphad is 12%, exceeding the critical maximum of 8.0%. Critical blocker triggers immediate `Unsuitable` status.
+   - **Static CSV mode:** Pune $\rightarrow$ Niphad (`20.0800, 74.1100`) where CSV slope is 12%, exceeding the critical maximum of 8.0%. Critical blocker triggers immediate `Unsuitable` status.
+   - **Override panel:** Click **"Unsuitable (Blocker)"** (simulates slope = 14.5%) to demo this status on demand.
 3. **Insufficient Data (Grey - Missingness Rule):**
    - **Reference (A):** Pune city (`18.5204, 73.8567`)
    - **Target (B):** Lonavala (`18.7557, 73.4091`)
-   - *Outcome:* Soil infiltration is NULL (unmeasured). Because infiltration is a critical factor (weight 0.35 > 0.30 threshold), status is `Insufficient Data`.
+   - *Outcome:* Soil infiltration is NULL / unmeasured. Because infiltration is a critical factor (weight 0.35 > 0.30 threshold), status is immediately `Insufficient Data`.
+   - **Override panel:** Click **"Insufficient Data (Missing)"** to demo missing critical factor handling.
 4. **Conditional (Amber - Non-Critical Limitation / Transfer Risk):**
    - **Reference (A):** Pune city (`18.5204, 73.8567`)
    - **Target (B):** Nashik city (`19.9975, 73.7898`)
    - *Outcome:* Open space indicator is 0 (absent), which is a non-critical factor (weight 0.15). Condition requires on-site spatial survey before implementation.
+   - *Note on Live APIs:* When live APIs are active (`run_live.ps1`), Pune $\rightarrow$ Niphad also produces `Conditional` because NASA POWER rainfall differs significantly (858 vs 1731 mm/yr, $>30\%$ transfer tolerance).
+   - **Override panel:** Click **"Conditional (Survey/Risk)"** to demo non-critical missingness or transfer risk on demand.
 
 ---
 

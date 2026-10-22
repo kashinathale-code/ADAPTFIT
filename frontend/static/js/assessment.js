@@ -443,6 +443,19 @@ function applyDemoProfile(type) {
     document.getElementById("ov_b_rain").value = "1100";
     document.getElementById("ov_b_space").value = "1";
     document.getElementById("ov_b_dist").value = "6.0";
+  } else if (type === 'conditional') {
+    // Location B has unmet non-critical open space (absent -> requires survey)
+    document.getElementById("ov_a_soil").value = "30.0";
+    document.getElementById("ov_a_slope").value = "3.0";
+    document.getElementById("ov_a_rain").value = "1200";
+    document.getElementById("ov_a_space").value = "1";
+    document.getElementById("ov_a_dist").value = "5.0";
+
+    document.getElementById("ov_b_soil").value = "28.0";
+    document.getElementById("ov_b_slope").value = "4.0";
+    document.getElementById("ov_b_rain").value = "1100";
+    document.getElementById("ov_b_space").value = "0"; // Non-critical unmet -> Conditional!
+    document.getElementById("ov_b_dist").value = "6.0";
   } else if (type === 'unsuitable') {
     // Location B fails slope blocker (>8%)
     document.getElementById("ov_a_soil").value = "30.0";
@@ -453,6 +466,19 @@ function applyDemoProfile(type) {
 
     document.getElementById("ov_b_soil").value = "25.0";
     document.getElementById("ov_b_slope").value = "14.5"; // Critical blocker!
+    document.getElementById("ov_b_rain").value = "1100";
+    document.getElementById("ov_b_space").value = "1";
+    document.getElementById("ov_b_dist").value = "6.0";
+  } else if (type === 'insufficient_data') {
+    // Location B has critical factor missing (soil infiltration unknown)
+    document.getElementById("ov_a_soil").value = "30.0";
+    document.getElementById("ov_a_slope").value = "3.0";
+    document.getElementById("ov_a_rain").value = "1200";
+    document.getElementById("ov_a_space").value = "1";
+    document.getElementById("ov_a_dist").value = "5.0";
+
+    document.getElementById("ov_b_soil").value = "";   // Missing critical factor -> Insufficient Data!
+    document.getElementById("ov_b_slope").value = "3.5";
     document.getElementById("ov_b_rain").value = "1100";
     document.getElementById("ov_b_space").value = "1";
     document.getElementById("ov_b_dist").value = "6.0";
