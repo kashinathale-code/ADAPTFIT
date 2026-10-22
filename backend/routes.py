@@ -35,6 +35,62 @@ from config import Config
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
+# Human-readable display names for the five assessment factors.
+_FACTOR_DISPLAY_NAMES: Dict[str, str] = {
+    "annual_rainfall": "rainfall",
+    "slope": "slope",
+    "soil_infiltration": "soil infiltration",
+    "open_space": "open space",
+    "building_distance": "building distance",
+}
+
+
+def build_data_badge_label(factors_payload: List[Dict[str, Any]]) -> str:
+    """
+    Build the header badge label string from the factors payload.
+
+    Each factor's source is classified as:
+      - "Live"              when a_source or b_source starts with "Live:"
+      - "Estimated (proxy)" when a_source or b_source starts with "Estimated (proxy):"
+      - "Demo"              otherwise
+
+    Return value:
+      - All factors demo  → "Sample data for demo, not live"
+      - Mixed             → e.g. "Live: rainfall, slope | Demo: soil infiltration …"
+
+    This pure function is intentionally free of Flask context so it can be
+    exercised directly in unit tests.
+    """
+    live: List[str] = []
+    estimated: List[str] = []
+    demo: List[str] = []
+
+    for f in factors_payload:
+        key = f.get("factor", "")
+        src_a = f.get("a_source") or ""
+        src_b = f.get("b_source") or f.get("source") or ""
+        name = _FACTOR_DISPLAY_NAMES.get(key, key.replace("_", " "))
+
+        if src_a.startswith("Live:") or src_b.startswith("Live:"):
+            live.append(name)
+        elif src_a.startswith("Estimated (proxy):") or src_b.startswith("Estimated (proxy):"):
+            estimated.append(name)
+        else:
+            demo.append(name)
+
+    # All-demo shortcut → original static message
+    if not live and not estimated:
+        return "Sample data for demo, not live"
+
+    parts: List[str] = []
+    if live:
+        parts.append(f"Live: {', '.join(live)}")
+    if estimated:
+        parts.append(f"Estimated: {', '.join(estimated)}")
+    if demo:
+        parts.append(f"Demo: {', '.join(demo)}")
+    return " | ".join(parts)
+
 
 def _get_db_connection() -> sqlite3.Connection:
     """Return a connection to the SQLite database with Row row_factory."""
@@ -305,7 +361,10 @@ def create_assessment():
     # Save Assessment factors into SQLite
     factors_payload: List[Dict[str, Any]] = []
     for fr in assessment_res.factors:
-        # Determine factor status representation matching TRD §5 schema
+        # Store the real factor_status ("met" | "unmet" | "unknown").
+        # transfer_risk is a separate flag — never overwrite factor_status with
+        # "transfer_risk" because that loses the real status and causes the badge
+        # to incorrectly show "Met" for an unmet factor when the row is read back.
         cur.execute(
             """
             INSERT INTO assessment_factors
@@ -317,7 +376,7 @@ def create_assessment():
                 fr.factor,
                 fr.a_value,
                 fr.b_value,
-                "transfer_risk" if fr.transfer_risk else fr.factor_status,
+                fr.factor_status,   # always the real status: met / unmet / unknown
                 fr.interpretation,
             ),
         )
@@ -376,6 +435,7 @@ def create_assessment():
         "suggested_checks": assessment_res.suggested_checks,
         "data_quality_warnings": combined_warnings,
         "disclaimer": assessment_res.disclaimer,
+        "data_badge_label": build_data_badge_label(factors_payload),
         "live_rainfall_used": bool(
             fetched_a.get("live_rainfall_used")
             or fetched_b.get("live_rainfall_used")
@@ -462,9 +522,12 @@ def get_assessment(assessment_id: int):
     a_env = fetch_location_environmental_data(a_lat, a_lon, name=row["a_name"]) if a_lat is not None and a_lon is not None else {"metadata": {}}
     b_env = fetch_location_environmental_data(b_lat, b_lon, name=row["b_name"]) if b_lat is not None and b_lon is not None else {"metadata": {}}
 
+    from backend.compatibility_engine import _requirement_summary, _is_transfer_risk
+
     for fr in factor_rows:
         req_meta = req_rows.get(fr["factor"])
         req_summary = ""
+        is_risk = False
         if req_meta:
             req_obj = Requirement(
                 factor=req_meta["factor"],
@@ -472,11 +535,23 @@ def get_assessment(assessment_id: int):
                 max_value=req_meta["max_value"],
                 unit=req_meta["unit"] or "",
             )
-            from backend.compatibility_engine import _requirement_summary
             req_summary = _requirement_summary(req_obj)
+            # Recompute transfer_risk from stored a/b values and requirement tolerances.
+            # factor_status now always holds the real status (met/unmet/unknown) so we
+            # must not infer transfer_risk from it.
+            is_risk = _is_transfer_risk(
+                fr["a_value"],
+                fr["b_value"],
+                req_meta["transfer_tolerance"],
+                req_meta["tolerance_type"],
+            )
 
-        is_risk = fr["factor_status"] == "transfer_risk"
-        status = "met" if is_risk else fr["factor_status"]
+        # factor_status stored in DB is always the real status: met / unmet / unknown
+        status = fr["factor_status"]
+        # Guard against legacy rows that stored "transfer_risk" as the status
+        if status == "transfer_risk":
+            status = "met"
+            is_risk = True
 
         if status == "met" and not is_risk:
             supporting.append(fr["factor"])
@@ -536,6 +611,7 @@ def get_assessment(assessment_id: int):
         "suggested_checks": [],
         "data_quality_warnings": [],
         "disclaimer": DISCLAIMER,
+        "data_badge_label": build_data_badge_label(factors_payload),
         "created_at": row["created_at"],
         "live_rainfall_used": bool(
             a_env.get("live_rainfall_used")

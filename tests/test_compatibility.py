@@ -541,3 +541,95 @@ class TestDynamicMissingWeightWarning:
         assert "20 %" in combined
         assert "30 %" not in combined
 
+
+# =========================================================================== #
+# TC-10  Badge bug: factor_status must be the real status, never "transfer_risk"
+# =========================================================================== #
+
+class TestBadgeStatusNeverOverwrittenByTransferRisk:
+    """
+    TC-10 – Regression guard for the badge bug.
+
+    When a factor is *unmet* AND has transfer_risk=True the engine must still
+    report factor_status="unmet".  Before the fix, routes.py stored
+    "transfer_risk" as the factor_status and then read it back as "met", making
+    the badge show green for a red factor (e.g. Slope 12 % against max 8 %).
+    """
+
+    def test_unmet_factor_with_transfer_risk_keeps_unmet_status(self, reqs, cfg):
+        """
+        slope B=12 % > max 8 % → unmet (critical).
+        |12 - 3| = 9 > absolute tolerance 3.0 → transfer_risk True.
+        factor_status must be "unmet", not "met" or "transfer_risk".
+        """
+        profile_b = {**_PROFILE_B_GOOD, "slope": 12.0}
+        result = assess(reqs, _PROFILE_A_GOOD, profile_b, cfg)
+
+        slope_fr = next(fr for fr in result.factors if fr.factor == "slope")
+
+        assert slope_fr.factor_status == "unmet", (
+            f"Expected factor_status='unmet' for slope=12 (max 8); "
+            f"got '{slope_fr.factor_status}'"
+        )
+        assert slope_fr.transfer_risk is True, (
+            "Expected transfer_risk=True for slope B=12, A=3 (diff=9 > tol=3)"
+        )
+
+    def test_met_factor_with_transfer_risk_keeps_met_status(self, reqs, cfg):
+        """
+        soil_infiltration B=50 >= min 12.7 → met.
+        |50 - 30| / 30 = 66.7 % > relative tolerance 50 % → transfer_risk True.
+        factor_status must be "met", not "transfer_risk".
+        """
+        profile_b = {**_PROFILE_B_GOOD, "soil_infiltration": 50.0}
+        result = assess(reqs, _PROFILE_A_GOOD, profile_b, cfg)
+
+        si_fr = next(fr for fr in result.factors if fr.factor == "soil_infiltration")
+
+        assert si_fr.factor_status == "met", (
+            f"Expected factor_status='met' for soil_infiltration=50 (min 12.7); "
+            f"got '{si_fr.factor_status}'"
+        )
+        assert si_fr.transfer_risk is True, (
+            "Expected transfer_risk=True for soil_infiltration B=50, A=30 "
+            "(diff=20/30=66.7% > tol=50%)"
+        )
+
+    def test_factor_status_is_never_literally_transfer_risk(self, reqs, cfg):
+        """
+        factor_status must only ever be 'met', 'unmet', or 'unknown' – the
+        string 'transfer_risk' must never appear as a factor_status value.
+        """
+        profile_b = {
+            "soil_infiltration": 50.0,   # met + transfer_risk
+            "slope": 12.0,               # unmet + transfer_risk
+            "annual_rainfall": 1100.0,
+            "open_space": 1.0,
+            "building_distance": 5.0,
+        }
+        result = assess(reqs, _PROFILE_A_GOOD, profile_b, cfg)
+
+        for fr in result.factors:
+            assert fr.factor_status in ("met", "unmet", "unknown"), (
+                f"factor_status for '{fr.factor}' must be met/unmet/unknown; "
+                f"got '{fr.factor_status}'"
+            )
+
+    def test_unmet_critical_with_transfer_risk_still_unsuitable(self, reqs, cfg):
+        """
+        An unmet critical factor (slope=12 > max 8) with transfer_risk must
+        still make the overall status 'unsuitable'.  If factor_status were
+        incorrectly set to 'met' the critical blocker would be missed.
+        """
+        profile_b = {**_PROFILE_B_GOOD, "slope": 12.0}
+        result = assess(reqs, _PROFILE_A_GOOD, profile_b, cfg)
+
+        assert result.status == "unsuitable", (
+            f"Unmet critical slope must give 'unsuitable'; got '{result.status}'"
+        )
+        assert "slope" in result.limiting_factors, (
+            "Unmet slope must appear in limiting_factors"
+        )
+        assert "slope" not in result.supporting_factors, (
+            "Unmet slope must NOT appear in supporting_factors"
+        )
