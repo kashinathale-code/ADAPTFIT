@@ -132,19 +132,57 @@
             <div class="override-grid">
               <div class="override-col">
                 <strong>Location A (Reference)</strong>
-                <label>Soil Infiltration (mm/hr): <input type="number" step="0.1" id="ov_a_soil" class="form-control-sm" placeholder="Leave blank for dataset"></label>
-                <label>Slope (%): <input type="number" step="0.1" id="ov_a_slope" class="form-control-sm" placeholder="Leave blank for dataset"></label>
-                <label>Annual Rainfall (mm): <input type="number" step="1" id="ov_a_rain" class="form-control-sm" placeholder="Leave blank for dataset"></label>
-                <label>Open Space: <select id="ov_a_space" class="form-control-sm"><option value="">Dataset</option><option value="1">1 (Present)</option><option value="0">0 (Absent)</option></select></label>
-                <label>Building Dist (m): <input type="number" step="0.1" id="ov_a_dist" class="form-control-sm" placeholder="Leave blank for dataset"></label>
+                <div class="form-group-override">
+                  <label for="ov_a_soil">Soil Infiltration (mm/hr):</label>
+                  <input type="number" step="0.1" id="ov_a_soil" class="form-control-sm" placeholder="Leave blank for dataset" aria-label="Location A Soil Infiltration override">
+                </div>
+                <div class="form-group-override">
+                  <label for="ov_a_slope">Slope (%):</label>
+                  <input type="number" step="0.1" id="ov_a_slope" class="form-control-sm" placeholder="Leave blank for dataset" aria-label="Location A Slope override">
+                </div>
+                <div class="form-group-override">
+                  <label for="ov_a_rain">Annual Rainfall (mm):</label>
+                  <input type="number" step="1" id="ov_a_rain" class="form-control-sm" placeholder="Leave blank for dataset" aria-label="Location A Annual Rainfall override">
+                </div>
+                <div class="form-group-override">
+                  <label for="ov_a_space">Open Space:</label>
+                  <select id="ov_a_space" class="form-control-sm" aria-label="Location A Open Space override">
+                    <option value="">Dataset</option>
+                    <option value="1">1 (Present)</option>
+                    <option value="0">0 (Absent)</option>
+                  </select>
+                </div>
+                <div class="form-group-override">
+                  <label for="ov_a_dist">Building Dist (m):</label>
+                  <input type="number" step="0.1" id="ov_a_dist" class="form-control-sm" placeholder="Leave blank for dataset" aria-label="Location A Building Distance override">
+                </div>
               </div>
               <div class="override-col">
                 <strong>Location B (Target)</strong>
-                <label>Soil Infiltration (mm/hr): <input type="number" step="0.1" id="ov_b_soil" class="form-control-sm" placeholder="Leave blank for dataset"></label>
-                <label>Slope (%): <input type="number" step="0.1" id="ov_b_slope" class="form-control-sm" placeholder="Leave blank for dataset"></label>
-                <label>Annual Rainfall (mm): <input type="number" step="1" id="ov_b_rain" class="form-control-sm" placeholder="Leave blank for dataset"></label>
-                <label>Open Space: <select id="ov_b_space" class="form-control-sm"><option value="">Dataset</option><option value="1">1 (Present)</option><option value="0">0 (Absent)</option></select></label>
-                <label>Building Dist (m): <input type="number" step="0.1" id="ov_b_dist" class="form-control-sm" placeholder="Leave blank for dataset"></label>
+                <div class="form-group-override">
+                  <label for="ov_b_soil">Soil Infiltration (mm/hr):</label>
+                  <input type="number" step="0.1" id="ov_b_soil" class="form-control-sm" placeholder="Leave blank for dataset" aria-label="Location B Soil Infiltration override">
+                </div>
+                <div class="form-group-override">
+                  <label for="ov_b_slope">Slope (%):</label>
+                  <input type="number" step="0.1" id="ov_b_slope" class="form-control-sm" placeholder="Leave blank for dataset" aria-label="Location B Slope override">
+                </div>
+                <div class="form-group-override">
+                  <label for="ov_b_rain">Annual Rainfall (mm):</label>
+                  <input type="number" step="1" id="ov_b_rain" class="form-control-sm" placeholder="Leave blank for dataset" aria-label="Location B Annual Rainfall override">
+                </div>
+                <div class="form-group-override">
+                  <label for="ov_b_space">Open Space:</label>
+                  <select id="ov_b_space" class="form-control-sm" aria-label="Location B Open Space override">
+                    <option value="">Dataset</option>
+                    <option value="1">1 (Present)</option>
+                    <option value="0">0 (Absent)</option>
+                  </select>
+                </div>
+                <div class="form-group-override">
+                  <label for="ov_b_dist">Building Dist (m):</label>
+                  <input type="number" step="0.1" id="ov_b_dist" class="form-control-sm" placeholder="Leave blank for dataset" aria-label="Location B Building Distance override">
+                </div>
               </div>
             </div>
             <div class="override-actions">

@@ -33,7 +33,7 @@
     <div class="history-toolbar">
       <div class="toolbar-left">
         <label for="historyStatusFilter" class="toolbar-label">Status:</label>
-        <select id="historyStatusFilter" class="form-control-sm" onchange="applyFilters()">
+        <select id="historyStatusFilter" class="form-control-sm" aria-label="Filter assessment history by status">
           <option value="all">All Statuses</option>
           <option value="suitable">Suitable</option>
           <option value="conditional">Conditional</option>
@@ -44,10 +44,10 @@
       <div class="toolbar-right">
         <span id="pageInfo" class="page-counter">Page 1</span>
         <div class="pagination-buttons">
-          <button type="button" id="prevPageBtn" class="btn btn-sm btn-secondary" onclick="changePage(-1)" disabled>
+          <button type="button" id="prevPageBtn" class="btn btn-sm btn-secondary" aria-label="Previous page" disabled>
             &larr; Prev
           </button>
-          <button type="button" id="nextPageBtn" class="btn btn-sm btn-secondary" onclick="changePage(1)" disabled>
+          <button type="button" id="nextPageBtn" class="btn btn-sm btn-secondary" aria-label="Next page" disabled>
             Next &rarr;
           </button>
         </div>
@@ -324,6 +324,18 @@ function escapeHtml(str) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  const filterEl = document.getElementById("historyStatusFilter");
+  if (filterEl) {
+    filterEl.addEventListener("change", applyFilters);
+  }
+  const prevBtn = document.getElementById("prevPageBtn");
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => changePage(-1));
+  }
+  const nextBtn = document.getElementById("nextPageBtn");
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => changePage(1));
+  }
   loadHistory(1);
 });
 </script>

@@ -1773,3 +1773,176 @@ body {
   font-size: 13.5px;
 }
 
+/* ==========================================================================
+   Mobile Responsiveness (375px+ screens) & Accessibility Enhancements (Task 12)
+   ========================================================================== */
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.preview-data-table {
+  min-width: 540px;
+}
+
+.results-factors-table {
+  min-width: 580px;
+}
+
+.history-table {
+  min-width: 620px;
+}
+
+.leaderboard-table {
+  min-width: 600px;
+}
+
+.matrix-table {
+  min-width: 600px;
+}
+
+.form-group-override {
+  margin-bottom: 8px;
+}
+
+.form-group-override label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 500;
+  margin-bottom: 2px;
+  color: var(--text-main);
+}
+
+@media (max-width: 768px) {
+  .topbar-container {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px 14px;
+  }
+
+  .nav-links {
+    overflow-x: auto;
+    max-width: 100%;
+    white-space: nowrap;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nav-link {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .demo-badge-header {
+    align-self: flex-start;
+    max-width: 100%;
+    font-size: 11px;
+    padding: 4px 10px;
+  }
+
+  .main-container {
+    padding: 16px 12px 36px 12px;
+  }
+
+  .results-overview-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .status-banner-content {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .status-headline {
+    font-size: 20px;
+  }
+
+  .hero-section {
+    padding: 24px 18px;
+  }
+
+  .hero-headline {
+    font-size: 28px;
+  }
+
+  .hero-paragraph {
+    font-size: 15px;
+  }
+
+  .cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid-3, .form-grid-2 {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .results-nav-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .results-nav-right {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-container {
+    padding: 12px 8px 32px 8px;
+  }
+
+  .assessment-form-panel,
+  .preview-table-card,
+  .history-card,
+  .feature-card,
+  .preview-box {
+    padding: 16px 12px;
+  }
+
+  .override-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .coords-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .leaflet-map-canvas {
+    height: 280px;
+  }
+
+  .page-heading {
+    font-size: 24px;
+  }
+
+  .brand-name {
+    font-size: 19px;
+  }
+
+  .preset-chips-row {
+    gap: 4px;
+  }
+
+  .chip {
+    padding: 2px 8px;
+    font-size: 11px;
+  }
+
+  .btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+}
+
+
