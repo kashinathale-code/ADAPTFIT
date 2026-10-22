@@ -241,6 +241,8 @@ def test_frontend_new_assessment_page(client):
     assert "newAssessmentDataBadge" in html
     assert "previewTableHeaderBadge" in html
     assert "candidate, unverified" in html
+    assert "applyDemoProfile('conditional')" in html
+    assert "applyDemoProfile('insufficient_data')" in html
     assert "Run assessment" in html
 
 
