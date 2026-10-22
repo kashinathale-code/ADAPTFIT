@@ -719,6 +719,57 @@ def test_compare_page_route(client):
     assert "leaderboardTable" in html
 
 
+# --------------------------------------------------------------------------- #
+# PDF Export Tests (FR-12)                                                    #
+# --------------------------------------------------------------------------- #
+
+def test_export_assessment_pdf_success(client):
+    # 1. Create an assessment first
+    create_res = client.post(
+        "/api/assessments",
+        json={
+            "adaptation_id": "rain_garden",
+            "reference_location": {
+                "name": "Pune Reference",
+                "latitude": 18.5204,
+                "longitude": 73.8567,
+            },
+            "target_location": {
+                "name": "Pimpri Candidate",
+                "latitude": 18.6298,
+                "longitude": 73.7997,
+            },
+        },
+    )
+    assert create_res.status_code == 201
+    aid = create_res.get_json()["assessment_id"]
+
+    # 2. Export assessment to PDF
+    pdf_res = client.get(f"/api/assessments/{aid}/pdf")
+    assert pdf_res.status_code == 200
+    assert "application/pdf" in pdf_res.content_type
+    assert f"ADAPTFIT_Assessment_{aid}.pdf" in pdf_res.headers.get("Content-Disposition", "")
+
+    # Validate PDF signature and length
+    assert len(pdf_res.data) > 1000
+    assert pdf_res.data.startswith(b"%PDF-")
+
+
+def test_export_assessment_pdf_not_found(client):
+    res = client.get("/api/assessments/999999/pdf")
+    assert res.status_code == 404
+    assert "not found" in res.get_json()["error"].lower()
+
+
+def test_results_page_contains_download_pdf_button(client):
+    res = client.get("/results")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "downloadPdfBtn" in html
+    assert "Download PDF" in html
+
+
+
 
 
 

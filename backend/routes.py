@@ -10,11 +10,12 @@ Implements TRD Section 7:
 
 from __future__ import annotations
 
+import io
 import os
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_file
 
 from backend.compatibility_engine import (
     DISCLAIMER,
@@ -749,9 +750,10 @@ def list_assessments():
 # GET /api/assessments/<id>                                                  #
 # --------------------------------------------------------------------------- #
 
-@api_bp.route("/assessments/<int:assessment_id>", methods=["GET"])
-def get_assessment(assessment_id: int):
-    """Retrieve a previously saved assessment by ID."""
+def _fetch_assessment_data(
+    assessment_id: int,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str], int]:
+    """Retrieve an assessment record and format into response dictionary."""
     conn = _get_db_connection()
     cur = conn.cursor()
 
@@ -771,7 +773,7 @@ def get_assessment(assessment_id: int):
     row = cur.fetchone()
     if not row:
         conn.close()
-        return jsonify({"error": f"Assessment with id {assessment_id} not found."}), 404
+        return None, f"Assessment with id {assessment_id} not found.", 404
 
     cur.execute(
         """
@@ -823,9 +825,6 @@ def get_assessment(assessment_id: int):
                 unit=req_meta["unit"] or "",
             )
             req_summary = _requirement_summary(req_obj)
-            # Recompute transfer_risk from stored a/b values and requirement tolerances.
-            # factor_status now always holds the real status (met/unmet/unknown) so we
-            # must not infer transfer_risk from it.
             is_risk = _is_transfer_risk(
                 fr["a_value"],
                 fr["b_value"],
@@ -833,9 +832,7 @@ def get_assessment(assessment_id: int):
                 req_meta["tolerance_type"],
             )
 
-        # factor_status stored in DB is always the real status: met / unmet / unknown
         status = fr["factor_status"]
-        # Guard against legacy rows that stored "transfer_risk" as the status
         if status == "transfer_risk":
             status = "met"
             is_risk = True
@@ -867,8 +864,6 @@ def get_assessment(assessment_id: int):
                 "rule_version": req_meta["rule_version"] if req_meta and req_meta["rule_version"] else "",
             }
         )
-
-    from backend.compatibility_engine import DISCLAIMER
 
     get_warnings = (
         a_env.get("warnings", [])
@@ -941,4 +936,36 @@ def get_assessment(assessment_id: int):
             or any((f.get("factor") in ("open_space", "building_distance") and ((f.get("source") or "").startswith("Live") or (f.get("b_source") or "").startswith("Live") or (f.get("a_source") or "").startswith("Live"))) for f in factors_payload)
         ),
     }
-    return jsonify(response_body), 200
+    return response_body, None, 200
+
+
+@api_bp.route("/assessments/<int:assessment_id>", methods=["GET"])
+def get_assessment(assessment_id: int):
+    """Retrieve a previously saved assessment by ID."""
+    data, err, status_code = _fetch_assessment_data(assessment_id)
+    if err:
+        return jsonify({"error": err}), status_code
+    return jsonify(data), 200
+
+
+@api_bp.route("/assessments/<int:assessment_id>/pdf", methods=["GET"])
+def export_assessment_pdf(assessment_id: int):
+    """Export an assessment to a downloadable PDF report (FR-12)."""
+    data, err, status_code = _fetch_assessment_data(assessment_id)
+    if err:
+        return jsonify({"error": err}), status_code
+
+    from backend.pdf_exporter import generate_assessment_pdf
+
+    try:
+        pdf_bytes = generate_assessment_pdf(data)
+        filename = f"ADAPTFIT_Assessment_{assessment_id}.pdf"
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=filename,
+        )
+    except Exception as exc:
+        current_app.logger.error("Failed to generate PDF for assessment %d: %s", assessment_id, exc)
+        return jsonify({"error": f"Failed to generate PDF: {exc}"}), 500

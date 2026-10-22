@@ -86,6 +86,17 @@ function renderAssessment(data) {
   if (idEl) idEl.textContent = `Assessment ID: #${data.assessment_id || '--'}`;
   if (titleEl) titleEl.textContent = `Assessment #${data.assessment_id || '--'} Results`;
 
+  // Download PDF Button (FR-12)
+  const pdfBtn = document.getElementById("downloadPdfBtn");
+  if (pdfBtn) {
+    if (data.assessment_id) {
+      pdfBtn.href = `/api/assessments/${data.assessment_id}/pdf`;
+      pdfBtn.style.display = "inline-flex";
+    } else {
+      pdfBtn.style.display = "none";
+    }
+  }
+
   // Locations
   const refLoc = data.reference_location || data.location_a || {};
   const tgtLoc = data.target_location || data.location_b || {};
