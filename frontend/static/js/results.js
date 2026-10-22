@@ -119,14 +119,8 @@ function renderAssessment(data) {
   // 1. Status Banner
   renderStatusBanner(data.status);
 
-  // Update header badge based on whether live rainfall was used
-  const liveUsed = Boolean(
-    data.live_rainfall_used ||
-    (data.factors && data.factors.some(f =>
-      (f.factor === "annual_rainfall" && ((f.source && f.source.includes("Live")) || (f.a_source && f.a_source.includes("Live")) || (f.b_source && f.b_source.includes("Live"))))
-    ))
-  );
-  updateHeaderDataBadge(liveUsed);
+  // Update header badge listing which factors are currently live, estimated or demo
+  updateHeaderDataBadge(data);
 
   // 2. Screening Score
   renderScore(data.score, data.status);
@@ -247,13 +241,23 @@ function renderFactorsTable(factors) {
     const srcB = f.b_source || f.source || "Demo value";
     const resB = f.b_resolution || f.resolution || "n/a (demo)";
 
-    const isLiveA = srcA && srcA.includes("Live");
-    const isLiveB = srcB && srcB.includes("Live");
-    const labelA = isLiveA ? "Live: NASA POWER" : "Demo value";
-    const labelB = isLiveB ? "Live: NASA POWER" : "Demo value";
+    function getProvenanceLabel(src) {
+      if (!src) return "Demo value";
+      if (src.startsWith("Live:") || src.startsWith("Estimated (proxy):")) {
+        return src;
+      }
+      return "Demo value";
+    }
 
-    const subA = (f.a_value !== null && srcA) ? `<div class="preview-val-prov ${isLiveA ? 'badge-provenance-live' : 'badge-provenance-demo'}">${escapeHtml(labelA)} &bull; ${escapeHtml(resA)}</div>` : "";
-    const subB = (f.b_value !== null && srcB) ? `<div class="preview-val-prov ${isLiveB ? 'badge-provenance-live' : 'badge-provenance-demo'}">${escapeHtml(labelB)} &bull; ${escapeHtml(resB)}</div>` : "";
+    const labelA = getProvenanceLabel(srcA);
+    const labelB = getProvenanceLabel(srcB);
+    const isSpecialA = labelA !== "Demo value";
+    const isSpecialB = labelB !== "Demo value";
+    const provClassA = (srcA || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcA || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : 'badge-provenance-demo');
+    const provClassB = (srcB || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcB || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : 'badge-provenance-demo');
+
+    const subA = (f.a_value !== null && srcA) ? `<div class="preview-val-prov ${provClassA}">${escapeHtml(labelA)} &bull; ${escapeHtml(resA)}</div>` : "";
+    const subB = (f.b_value !== null && srcB) ? `<div class="preview-val-prov ${provClassB}">${escapeHtml(labelB)} &bull; ${escapeHtml(resB)}</div>` : "";
 
     const valA = f.a_value !== null ? `<div><strong>${f.a_value}</strong></div>${subA}` : `<span class="badge-unknown">Unknown</span>`;
     const valB = f.b_value !== null ? `<div><strong>${f.b_value}</strong></div>${subB}` : `<span class="badge-unknown">Unknown</span>`;
@@ -275,9 +279,9 @@ function renderFactorsTable(factors) {
     }
 
     // Provenance (source / resolution)
-    const isLive = isLiveB || isLiveA;
-    const displaySrc = isLive ? "Live: NASA POWER" : "Demo value";
-    const displayRes = isLive ? (isLiveB ? resB : resA) : (f.resolution || "n/a (demo)");
+    const isLive = isSpecialB || isSpecialA;
+    const displaySrc = isSpecialB ? labelB : (isSpecialA ? labelA : "Demo value");
+    const displayRes = isSpecialB ? resB : (isSpecialA ? resA : (f.resolution || "n/a (demo)"));
     const prov = `<div class="table-prov-text">Source: ${escapeHtml(displaySrc)} &bull; Res: ${escapeHtml(displayRes)}</div>`;
 
     const row = document.createElement("tr");
@@ -330,12 +334,45 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
 }
 
-function updateHeaderDataBadge(liveUsed) {
+function updateHeaderDataBadge(data) {
+  const factorNames = {
+    annual_rainfall: "rainfall",
+    slope: "slope",
+    soil_infiltration: "soil infiltration",
+    open_space: "open space",
+    building_distance: "building distance"
+  };
+
+  const live = [];
+  const estimated = [];
+  const demo = [];
+
+  const factors = (data && data.factors) ? data.factors : [];
+  const allKeys = ["annual_rainfall", "slope", "soil_infiltration", "open_space", "building_distance"];
+  allKeys.forEach(k => {
+    const f = factors.find(item => item.factor === k);
+    const srcA = f?.a_source || "";
+    const srcB = f?.b_source || f?.source || "";
+    const name = factorNames[k] || k;
+    if (srcA.startsWith("Live:") || srcB.startsWith("Live:")) {
+      live.push(name);
+    } else if (srcA.startsWith("Estimated (proxy):") || srcB.startsWith("Estimated (proxy):")) {
+      estimated.push(name);
+    } else {
+      demo.push(name);
+    }
+  });
+
+  const parts = [];
+  if (live.length > 0) parts.push(`Live: ${live.join(", ")}`);
+  if (estimated.length > 0) parts.push(`Estimated: ${estimated.join(", ")}`);
+  if (demo.length > 0) parts.push(`Demo: ${demo.join(", ")}`);
+
+  const text = parts.join(" | ");
+  const isMixedOrLive = live.length > 0 || estimated.length > 0;
+
   const badgeText = document.getElementById("headerBadgeText");
   const badgeContainer = document.getElementById("headerDataBadge") || document.querySelector(".demo-badge-header");
-  const text = liveUsed
-    ? "Mixed data: rainfall live (NASA POWER), other values demo"
-    : "Sample data for demo, not live";
 
   if (badgeText) {
     badgeText.textContent = text;
@@ -345,7 +382,7 @@ function updateHeaderDataBadge(liveUsed) {
   }
 
   if (badgeContainer) {
-    if (liveUsed) {
+    if (isMixedOrLive) {
       badgeContainer.classList.add("mixed-live");
     } else {
       badgeContainer.classList.remove("mixed-live");

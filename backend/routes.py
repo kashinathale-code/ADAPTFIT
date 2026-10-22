@@ -120,6 +120,9 @@ def get_location_data():
         "factors": factors_payload,
         "data_quality_warnings": all_warnings,
         "live_rainfall_used": data.get("live_rainfall_used", False),
+        "live_slope_used": data.get("live_slope_used", False),
+        "live_soil_used": data.get("live_soil_used", False),
+        "live_osm_used": data.get("live_osm_used", False),
     }
     return jsonify(response_payload), 200
 
@@ -376,7 +379,22 @@ def create_assessment():
         "live_rainfall_used": bool(
             fetched_a.get("live_rainfall_used")
             or fetched_b.get("live_rainfall_used")
-            or any((f.get("source") == "Live: NASA POWER" or f.get("b_source") == "Live: NASA POWER" or f.get("a_source") == "Live: NASA POWER") for f in factors_payload)
+            or any((f.get("factor") == "annual_rainfall" and ((f.get("source") or "").startswith("Live") or (f.get("b_source") or "").startswith("Live") or (f.get("a_source") or "").startswith("Live"))) for f in factors_payload)
+        ),
+        "live_slope_used": bool(
+            fetched_a.get("live_slope_used")
+            or fetched_b.get("live_slope_used")
+            or any((f.get("factor") == "slope" and ((f.get("source") or "").startswith("Live") or (f.get("b_source") or "").startswith("Live") or (f.get("a_source") or "").startswith("Live"))) for f in factors_payload)
+        ),
+        "live_soil_used": bool(
+            fetched_a.get("live_soil_used")
+            or fetched_b.get("live_soil_used")
+            or any((f.get("factor") == "soil_infiltration" and ((f.get("source") or "").startswith("Live") or (f.get("b_source") or "").startswith("Live") or (f.get("a_source") or "").startswith("Live"))) for f in factors_payload)
+        ),
+        "live_osm_used": bool(
+            fetched_a.get("live_osm_used")
+            or fetched_b.get("live_osm_used")
+            or any((f.get("factor") in ("open_space", "building_distance") and ((f.get("source") or "").startswith("Live") or (f.get("b_source") or "").startswith("Live") or (f.get("a_source") or "").startswith("Live"))) for f in factors_payload)
         ),
     }
     return jsonify(response_body), 201
@@ -522,7 +540,22 @@ def get_assessment(assessment_id: int):
         "live_rainfall_used": bool(
             a_env.get("live_rainfall_used")
             or b_env.get("live_rainfall_used")
-            or any((f.get("source") == "Live: NASA POWER" or f.get("b_source") == "Live: NASA POWER" or f.get("a_source") == "Live: NASA POWER") for f in factors_payload)
+            or any((f.get("factor") == "annual_rainfall" and ((f.get("source") or "").startswith("Live") or (f.get("b_source") or "").startswith("Live") or (f.get("a_source") or "").startswith("Live"))) for f in factors_payload)
+        ),
+        "live_slope_used": bool(
+            a_env.get("live_slope_used")
+            or b_env.get("live_slope_used")
+            or any((f.get("factor") == "slope" and ((f.get("source") or "").startswith("Live") or (f.get("b_source") or "").startswith("Live") or (f.get("a_source") or "").startswith("Live"))) for f in factors_payload)
+        ),
+        "live_soil_used": bool(
+            a_env.get("live_soil_used")
+            or b_env.get("live_soil_used")
+            or any((f.get("factor") == "soil_infiltration" and ((f.get("source") or "").startswith("Live") or (f.get("b_source") or "").startswith("Live") or (f.get("a_source") or "").startswith("Live"))) for f in factors_payload)
+        ),
+        "live_osm_used": bool(
+            a_env.get("live_osm_used")
+            or b_env.get("live_osm_used")
+            or any((f.get("factor") in ("open_space", "building_distance") and ((f.get("source") or "").startswith("Live") or (f.get("b_source") or "").startswith("Live") or (f.get("a_source") or "").startswith("Live"))) for f in factors_payload)
         ),
     }
     return jsonify(response_body), 200

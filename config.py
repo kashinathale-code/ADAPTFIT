@@ -29,6 +29,9 @@ class Config:
     # Live data flags                                                      #
     # ------------------------------------------------------------------ #
     USE_LIVE_RAINFALL: bool = os.environ.get("USE_LIVE_RAINFALL", "false").lower() == "true"
+    USE_LIVE_SLOPE: bool = os.environ.get("USE_LIVE_SLOPE", "false").lower() == "true"
+    USE_LIVE_SOIL: bool = os.environ.get("USE_LIVE_SOIL", "false").lower() == "true"
+    USE_LIVE_OSM: bool = os.environ.get("USE_LIVE_OSM", "false").lower() == "true"
 
     # ------------------------------------------------------------------ #
     # External API keys – loaded from env, never committed                #

@@ -46,17 +46,110 @@ DEFAULT_CSV_PATH = os.path.join(
 NASA_POWER_POINT_URL = "https://power.larc.nasa.gov/api/temporal/climatology/point"
 NASA_POWER_RESOLUTION = "0.5° × 0.5° (~50 km × 50 km coarse grid)"
 NASA_POWER_SOURCE = "Live: NASA POWER"
+
+# Open-Meteo Elevation API configuration (Copernicus DEM GLO-90)
+OPEN_METEO_ELEVATION_URL = "https://api.open-meteo.com/v1/elevation"
+OPEN_METEO_ELEVATION_SOURCE = "Live: Open-Meteo (Copernicus DEM)"
+OPEN_METEO_ELEVATION_RESOLUTION = "90m (Copernicus DEM GLO-90)"
+OPEN_METEO_DATA_DATE = "Copernicus DEM 2021 release"
+
+# SoilGrids REST API configuration
+# Provides USDA soil texture class (TEXCLSS) at 0-30 cm depth.
+SOILGRIDS_PROPERTIES_URL = "https://rest.isric.org/soilgrids/v2.0/properties/query"
+SOILGRIDS_SOURCE = "Estimated (proxy): SoilGrids v2.0 (ISRIC)"
+SOILGRIDS_RESOLUTION = "250m (SoilGrids v2.0)"
+SOILGRIDS_DATA_DATE = "SoilGrids v2.0 (compiled 2020)"
+
+# ---------------------------------------------------------------------------
+# Rawls et al. (1983) saturated hydraulic conductivity (Ks) lookup table
+# ---------------------------------------------------------------------------
+# Source:
+#   Rawls, W.J., Brakensiek, D.L. & Miller, N. (1983). "Green-Ampt
+#   infiltration parameters from soil data." Journal of Hydraulic
+#   Engineering, 109(1), 62-70. https://doi.org/10.1061/(ASCE)0733-9429(1983)109:1(62)
+#
+# Ks values in mm/hr represent the long-run steady-state saturated
+# infiltration rate and are used as a proxy for soil_infiltration.
+# Texture class names are normalised to USDA convention for matching
+# SoilGrids TEXCLSS values.
+#
+# | USDA Texture Class  | Ks (mm/hr) |
+# |---------------------|------------|
+# | Sand                |   117.8    |
+# | Loamy sand          |    29.9    |
+# | Sandy loam          |    10.9    |
+# | Loam                |     3.4    |
+# | Silt loam           |     6.5    |
+# | Sandy clay loam     |     1.5    |
+# | Clay loam           |     1.0    |
+# | Silty clay loam     |     1.0    |
+# | Sandy clay          |     0.6    |
+# | Silty clay          |     0.5    |
+# | Clay                |     0.3    |
+
+RAWLS_1983_KS_TABLE: Dict[str, float] = {
+    "sand": 117.8,
+    "loamy sand": 29.9,
+    "sandy loam": 10.9,
+    "loam": 3.4,
+    "silt loam": 6.5,
+    "sandy clay loam": 1.5,
+    "clay loam": 1.0,
+    "silty clay loam": 1.0,
+    "sandy clay": 0.6,
+    "silty clay": 0.5,
+    "clay": 0.3,
+    # Aliases used in SoilGrids TEXCLSS labels
+    "silt": 6.5,           # treat as silt loam (conservative)
+    "sandy clay loam": 1.5,
+    "loamy fine sand": 10.9,  # treat as sandy loam
+    "fine sand": 29.9,     # treat as loamy sand
+    "coarse sand": 117.8,  # treat as sand
+}
+
+
+def infiltration_from_texture(texture_class: str) -> Optional[float]:
+    """
+    Look up saturated hydraulic conductivity (mm/hr) from a USDA texture
+    class name using the Rawls et al. (1983) table.
+
+    The lookup is case-insensitive and strips surrounding whitespace.
+    Returns None if the texture class is not in the table.
+    """
+    key = texture_class.strip().lower()
+    if key in RAWLS_1983_KS_TABLE:
+        return RAWLS_1983_KS_TABLE[key]
+    # Try prefix matching for variants like "Loamy Fine Sand"
+    for table_key, ks in RAWLS_1983_KS_TABLE.items():
+        if key.startswith(table_key) or table_key.startswith(key):
+            return ks
+    return None
+
+
+# OpenStreetMap Overpass API configuration
+# open_space: parks/greenery within 500 m radius (binary 1/0)
+# building_distance: nearest building centroid distance in metres (within 200 m)
+OSM_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OSM_SOURCE = "Live: OpenStreetMap (Overpass)"
+OSM_RESOLUTION = "~1m positional (OSM contributor data)"
+OSM_DATA_DATE = "OpenStreetMap (retrieved at query time)"
+# Radius for open-space detection (metres)
+OSM_OPEN_SPACE_RADIUS_M = 500
+# Radius for building search (metres)
+OSM_BUILDING_RADIUS_M = 200
+
 DEMO_SOURCE = "Demo value"
 DEMO_RESOLUTION = "n/a (demo)"
 
 
-def get_cached_rainfall(
+def get_cached_feature(
+    factor: str,
     lat: float,
     lon: float,
     db_path: str,
     staleness_hours: int = 24,
 ) -> Optional[Dict[str, Any]]:
-    """Retrieve non-stale cached annual_rainfall feature from SQLite if present."""
+    """Retrieve non-stale cached environmental feature from SQLite if present."""
     if not os.path.exists(db_path):
         return None
     try:
@@ -68,13 +161,13 @@ def get_cached_rainfall(
             SELECT ef.value, ef.unit, ef.source, ef.resolution, ef.data_date, ef.retrieved_at, ef.transformation
             FROM environmental_features ef
             JOIN locations l ON ef.location_id = l.id
-            WHERE ef.factor = 'annual_rainfall'
+            WHERE ef.factor = ?
               AND abs(l.latitude - ?) < 0.0001
               AND abs(l.longitude - ?) < 0.0001
             ORDER BY ef.id DESC
             LIMIT 1
             """,
-            (lat, lon),
+            (factor, lat, lon),
         )
         row = cur.fetchone()
         conn.close()
@@ -91,9 +184,9 @@ def get_cached_rainfall(
             if age_hours < staleness_hours:
                 return {
                     "value": row["value"],
-                    "unit": row["unit"] or "mm/yr",
-                    "source": row["source"] or NASA_POWER_SOURCE,
-                    "resolution": row["resolution"] or NASA_POWER_RESOLUTION,
+                    "unit": row["unit"] or FACTOR_UNITS.get(factor, ""),
+                    "source": row["source"],
+                    "resolution": row["resolution"],
                     "data_date": row["data_date"],
                     "retrieved_at": row["retrieved_at"],
                     "transformation": row["transformation"],
@@ -105,10 +198,11 @@ def get_cached_rainfall(
     return None
 
 
-def cache_rainfall(
+def cache_feature(
+    factor: str,
     lat: float,
     lon: float,
-    value: float,
+    value: Optional[float],
     unit: str,
     source: str,
     resolution: str,
@@ -118,7 +212,7 @@ def cache_rainfall(
     db_path: str,
     name: Optional[str] = None,
 ) -> None:
-    """Store retrieved rainfall in locations and environmental_features tables."""
+    """Store retrieved environmental feature in locations and environmental_features tables."""
     if not os.path.exists(db_path):
         return
     try:
@@ -144,8 +238,8 @@ def cache_rainfall(
 
         # Check if feature already exists for this location
         cur.execute(
-            "SELECT id FROM environmental_features WHERE location_id = ? AND factor = 'annual_rainfall' LIMIT 1",
-            (loc_id,),
+            "SELECT id FROM environmental_features WHERE location_id = ? AND factor = ? LIMIT 1",
+            (loc_id, factor),
         )
         ef_row = cur.fetchone()
         if ef_row:
@@ -162,14 +256,181 @@ def cache_rainfall(
                 """
                 INSERT INTO environmental_features
                     (location_id, factor, value, unit, source, resolution, data_date, retrieved_at, transformation)
-                VALUES (?, 'annual_rainfall', ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (loc_id, value, unit, source, resolution, data_date, retrieved_at, transformation),
+                (loc_id, factor, value, unit, source, resolution, data_date, retrieved_at, transformation),
             )
         conn.commit()
         conn.close()
     except sqlite3.Error:
         pass
+
+
+def get_cached_rainfall(
+    lat: float,
+    lon: float,
+    db_path: str,
+    staleness_hours: int = 24,
+) -> Optional[Dict[str, Any]]:
+    """Retrieve non-stale cached annual_rainfall feature from SQLite if present."""
+    cached = get_cached_feature("annual_rainfall", lat, lon, db_path, staleness_hours=staleness_hours)
+    if cached is not None:
+        if not cached.get("source"):
+            cached["source"] = NASA_POWER_SOURCE
+        if not cached.get("resolution"):
+            cached["resolution"] = NASA_POWER_RESOLUTION
+        if not cached.get("unit"):
+            cached["unit"] = "mm/yr"
+    return cached
+
+
+def cache_rainfall(
+    lat: float,
+    lon: float,
+    value: float,
+    unit: str,
+    source: str,
+    resolution: str,
+    data_date: str,
+    retrieved_at: str,
+    transformation: str,
+    db_path: str,
+    name: Optional[str] = None,
+) -> None:
+    """Store retrieved rainfall in locations and environmental_features tables."""
+    cache_feature(
+        factor="annual_rainfall",
+        lat=lat,
+        lon=lon,
+        value=value,
+        unit=unit,
+        source=source,
+        resolution=resolution,
+        data_date=data_date,
+        retrieved_at=retrieved_at,
+        transformation=transformation,
+        db_path=db_path,
+        name=name,
+    )
+
+
+def fetch_open_meteo_slope(
+    lat: float,
+    lon: float,
+    db_path: Optional[str] = None,
+    staleness_hours: int = 24,
+    timeout: float = 10.0,
+    name: Optional[str] = None,
+) -> Tuple[Optional[float], Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Fetch elevation for target point and 4 neighbouring points ~100m away (north, south, east, west)
+    from Open-Meteo elevation API (Copernicus DEM GLO-90) with SQLite caching.
+    Calculates ground slope in percent via central difference gradient.
+
+    Returns:
+        (slope_percent, metadata_dict, error_warning)
+    """
+    target_db = db_path or Config.DATABASE_PATH
+
+    # 1. Check cache first
+    cached = get_cached_feature("slope", lat, lon, target_db, staleness_hours=staleness_hours)
+    if cached is not None:
+        return (
+            cached["value"],
+            {
+                "unit": cached["unit"],
+                "source": cached["source"],
+                "resolution": cached["resolution"],
+                "data_date": cached["data_date"],
+                "retrieved_at": cached["retrieved_at"],
+                "transformation": cached["transformation"],
+            },
+            None,
+        )
+
+    # 2. Compute 4 neighbouring points approximately 100 m away
+    # 1 degree of latitude is ~111,320 m
+    delta_lat = 100.0 / 111320.0
+    lat_north = lat + delta_lat
+    lat_south = lat - delta_lat
+
+    cos_lat = math.cos(math.radians(lat))
+    if abs(cos_lat) < 1e-6:
+        cos_lat = 1e-6
+    delta_lon = 100.0 / (111320.0 * cos_lat)
+    lon_east = lon + delta_lon
+    lon_west = lon - delta_lon
+
+    # Points order: [center, north, south, east, west]
+    lats = [lat, lat_north, lat_south, lat, lat]
+    lons = [lon, lon, lon, lon_east, lon_west]
+    lat_param = ",".join(f"{x:.6f}" for x in lats)
+    lon_param = ",".join(f"{y:.6f}" for y in lons)
+
+    params = {
+        "latitude": lat_param,
+        "longitude": lon_param,
+    }
+
+    try:
+        resp = requests.get(OPEN_METEO_ELEVATION_URL, params=params, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        elevations = data.get("elevation")
+
+        if not isinstance(elevations, list) or len(elevations) < 5 or any(e is None for e in elevations[:5]):
+            return None, None, "Live slope data from Open-Meteo was unavailable; fell back to demo/sample data."
+
+        z_center = float(elevations[0])
+        z_north = float(elevations[1])
+        z_south = float(elevations[2])
+        z_east = float(elevations[3])
+        z_west = float(elevations[4])
+
+        # Slope in percent via 4-neighbour central difference gradient:
+        # Distance between East and West is 200m; distance between North and South is 200m
+        dz_dx = (z_east - z_west) / 200.0
+        dz_dy = (z_north - z_south) / 200.0
+        gradient = math.sqrt(dz_dx ** 2 + dz_dy ** 2)
+        slope_pct = round(gradient * 100.0, 1)
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        transformation = (
+            "Slope calculated via 4-neighbour central difference gradient: "
+            "dz/dx = (elev_east - elev_west) / 200m, "
+            "dz/dy = (elev_north - elev_south) / 200m, "
+            "slope% = sqrt((dz/dx)^2 + (dz/dy)^2) * 100"
+        )
+
+        meta = {
+            "unit": "%",
+            "source": OPEN_METEO_ELEVATION_SOURCE,
+            "resolution": OPEN_METEO_ELEVATION_RESOLUTION,
+            "data_date": OPEN_METEO_DATA_DATE,
+            "retrieved_at": now_iso,
+            "transformation": transformation,
+        }
+
+        # Cache in database
+        cache_feature(
+            factor="slope",
+            lat=lat,
+            lon=lon,
+            value=slope_pct,
+            unit="%",
+            source=OPEN_METEO_ELEVATION_SOURCE,
+            resolution=OPEN_METEO_ELEVATION_RESOLUTION,
+            data_date=OPEN_METEO_DATA_DATE,
+            retrieved_at=now_iso,
+            transformation=transformation,
+            db_path=target_db,
+            name=name,
+        )
+
+        return slope_pct, meta, None
+
+    except (requests.RequestException, ValueError, KeyError):
+        return None, None, "Live slope data from Open-Meteo was unavailable; fell back to demo/sample data."
 
 
 def fetch_nasa_power_rainfall(
@@ -258,6 +519,364 @@ def fetch_nasa_power_rainfall(
         return None, None, "Live rainfall data from NASA POWER was unavailable; fell back to demo/sample data."
 
 
+def fetch_soilgrids_infiltration(
+    lat: float,
+    lon: float,
+    db_path: Optional[str] = None,
+    staleness_hours: int = 24,
+    timeout: float = 10.0,
+    name: Optional[str] = None,
+) -> Tuple[Optional[float], Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Fetch USDA soil texture class from SoilGrids v2.0 REST API and estimate
+    saturated hydraulic conductivity (soil_infiltration, mm/hr) using the
+    Rawls et al. (1983) lookup table.
+
+    API endpoint: https://rest.isric.org/soilgrids/v2.0/properties/query
+    Property requested: TEXCLSS (WRB texture class, 0-30 cm mean)
+
+    Source citation:
+        Rawls, W.J., Brakensiek, D.L. & Miller, N. (1983). "Green-Ampt
+        infiltration parameters from soil data." J. Hydraulic Engineering,
+        109(1), 62-70. https://doi.org/10.1061/(ASCE)0733-9429(1983)109:1(62)
+
+    Returns:
+        (infiltration_mm_hr, metadata_dict, error_warning)
+    """
+    target_db = db_path or Config.DATABASE_PATH
+
+    # 1. Check cache first
+    cached = get_cached_feature("soil_infiltration", lat, lon, target_db, staleness_hours=staleness_hours)
+    if cached is not None:
+        return (
+            cached["value"],
+            {
+                "unit": cached["unit"],
+                "source": cached["source"],
+                "resolution": cached["resolution"],
+                "data_date": cached["data_date"],
+                "retrieved_at": cached["retrieved_at"],
+                "transformation": cached["transformation"],
+            },
+            None,
+        )
+
+    # 2. Call SoilGrids REST API for TEXCLSS property
+    params = {
+        "lon": lon,
+        "lat": lat,
+        "property": "TEXCLSS",
+        "depth": "0-30cm",
+        "value": "mean",
+    }
+    try:
+        resp = requests.get(SOILGRIDS_PROPERTIES_URL, params=params, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Navigate: properties.layers[0].depths[0].values.mean
+        layers = data.get("properties", {}).get("layers", [])
+        texture_class: Optional[str] = None
+        for layer in layers:
+            if layer.get("name") == "TEXCLSS":
+                depths = layer.get("depths", [])
+                if depths:
+                    mean_val = depths[0].get("values", {}).get("mean")
+                    if isinstance(mean_val, str):
+                        texture_class = mean_val
+                    elif isinstance(mean_val, (int, float)):
+                        # Sometimes returned as integer code; try label first
+                        label = depths[0].get("label")
+                        texture_class = label if isinstance(label, str) else None
+                break
+
+        if not texture_class:
+            return (
+                None,
+                None,
+                "Live soil data from SoilGrids was unavailable or returned no texture class; "
+                "fell back to demo/sample data.",
+            )
+
+        ks = infiltration_from_texture(texture_class)
+        if ks is None:
+            return (
+                None,
+                None,
+                f"SoilGrids returned texture class '{texture_class}' which is not in the "
+                "Rawls et al. (1983) lookup table; fell back to demo/sample data.",
+            )
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        transformation = (
+            f"Texture class '{texture_class}' from SoilGrids TEXCLSS (0-30 cm mean) → "
+            f"Ks = {ks} mm/hr via Rawls et al. (1983) Table 1 "
+            "[DOI: 10.1061/(ASCE)0733-9429(1983)109:1(62)]"
+        )
+
+        meta = {
+            "unit": "mm/hr",
+            "source": SOILGRIDS_SOURCE,
+            "resolution": SOILGRIDS_RESOLUTION,
+            "data_date": SOILGRIDS_DATA_DATE,
+            "retrieved_at": now_iso,
+            "transformation": transformation,
+        }
+
+        # Cache in database
+        cache_feature(
+            factor="soil_infiltration",
+            lat=lat,
+            lon=lon,
+            value=ks,
+            unit="mm/hr",
+            source=SOILGRIDS_SOURCE,
+            resolution=SOILGRIDS_RESOLUTION,
+            data_date=SOILGRIDS_DATA_DATE,
+            retrieved_at=now_iso,
+            transformation=transformation,
+            db_path=target_db,
+            name=name,
+        )
+
+        return ks, meta, None
+
+    except (requests.RequestException, ValueError, KeyError):
+        return (
+            None,
+            None,
+            "Live soil data from SoilGrids was unavailable; fell back to demo/sample data.",
+        )
+
+
+def fetch_osm_open_space(
+    lat: float,
+    lon: float,
+    db_path: Optional[str] = None,
+    staleness_hours: int = 24,
+    timeout: float = 10.0,
+    radius_m: int = OSM_OPEN_SPACE_RADIUS_M,
+    name: Optional[str] = None,
+) -> Tuple[Optional[float], Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Query OpenStreetMap Overpass API for parks / green spaces within `radius_m`
+    metres of the target point.
+
+    Returns:
+        (1.0 if any open space found, 0.0 if none, metadata_dict, error_warning)
+    """
+    target_db = db_path or Config.DATABASE_PATH
+
+    # 1. Check cache
+    cached = get_cached_feature("open_space", lat, lon, target_db, staleness_hours=staleness_hours)
+    if cached is not None:
+        return (
+            cached["value"],
+            {
+                "unit": cached["unit"],
+                "source": cached["source"],
+                "resolution": cached["resolution"],
+                "data_date": cached["data_date"],
+                "retrieved_at": cached["retrieved_at"],
+                "transformation": cached["transformation"],
+            },
+            None,
+        )
+
+    # 2. Build Overpass QL query for parks, gardens, forests, grass areas
+    overpass_query = (
+        f"[out:json][timeout:{int(timeout)}];"
+        f"("
+        f'way["leisure"~"park|garden|nature_reserve|recreation_ground"]'
+        f"(around:{radius_m},{lat},{lon});"
+        f'relation["leisure"~"park|garden|nature_reserve|recreation_ground"]'
+        f"(around:{radius_m},{lat},{lon});"
+        f'way["landuse"~"grass|forest|meadow|village_green"]'
+        f"(around:{radius_m},{lat},{lon});"
+        f");"
+        f"out count;"
+    )
+
+    try:
+        resp = requests.post(
+            OSM_OVERPASS_URL,
+            data={"data": overpass_query},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        total_count = data.get("elements", [])
+        # Overpass "out count" returns one element with "type": "count"
+        count_elements = [
+            e for e in total_count
+            if isinstance(e, dict) and e.get("type") == "count"
+        ]
+        if count_elements:
+            tags = count_elements[0].get("tags", {})
+            total = int(tags.get("total", 0))
+        else:
+            # Fallback: any non-count elements means features were found
+            total = len(total_count)
+
+        open_space_val = 1.0 if total > 0 else 0.0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        transformation = (
+            f"Overpass QL query: leisure/landuse parks and green areas "
+            f"within {radius_m}m radius; result = {'present' if open_space_val else 'absent'} "
+            f"({total} feature(s) found)"
+        )
+
+        meta = {
+            "unit": "binary (1=present, 0=absent)",
+            "source": OSM_SOURCE,
+            "resolution": OSM_RESOLUTION,
+            "data_date": OSM_DATA_DATE,
+            "retrieved_at": now_iso,
+            "transformation": transformation,
+        }
+
+        cache_feature(
+            factor="open_space",
+            lat=lat,
+            lon=lon,
+            value=open_space_val,
+            unit="binary (1=present, 0=absent)",
+            source=OSM_SOURCE,
+            resolution=OSM_RESOLUTION,
+            data_date=OSM_DATA_DATE,
+            retrieved_at=now_iso,
+            transformation=transformation,
+            db_path=target_db,
+            name=name,
+        )
+
+        return open_space_val, meta, None
+
+    except (requests.RequestException, ValueError, KeyError):
+        return (
+            None,
+            None,
+            "Live open_space data from OpenStreetMap was unavailable; fell back to demo/sample data.",
+        )
+
+
+def fetch_osm_building_distance(
+    lat: float,
+    lon: float,
+    db_path: Optional[str] = None,
+    staleness_hours: int = 24,
+    timeout: float = 10.0,
+    radius_m: int = OSM_BUILDING_RADIUS_M,
+    name: Optional[str] = None,
+) -> Tuple[Optional[float], Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Query OpenStreetMap Overpass API for buildings within `radius_m` metres and
+    return the distance to the nearest building centroid in metres.
+
+    Centroid approximation: the midpoint of the bounding box returned by
+    Overpass for each way. Distance computed via haversine formula.
+
+    Returns:
+        (distance_m or None, metadata_dict, error_warning)
+    """
+    target_db = db_path or Config.DATABASE_PATH
+
+    # 1. Check cache
+    cached = get_cached_feature("building_distance", lat, lon, target_db, staleness_hours=staleness_hours)
+    if cached is not None:
+        return (
+            cached["value"],
+            {
+                "unit": cached["unit"],
+                "source": cached["source"],
+                "resolution": cached["resolution"],
+                "data_date": cached["data_date"],
+                "retrieved_at": cached["retrieved_at"],
+                "transformation": cached["transformation"],
+            },
+            None,
+        )
+
+    # 2. Build Overpass QL query for buildings
+    overpass_query = (
+        f"[out:json][timeout:{int(timeout)}];"
+        f'way["building"](around:{radius_m},{lat},{lon});'
+        f"out bb;"
+    )
+
+    try:
+        resp = requests.post(
+            OSM_OVERPASS_URL,
+            data={"data": overpass_query},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        elements = data.get("elements", [])
+        buildings = [e for e in elements if isinstance(e, dict) and e.get("type") == "way"]
+
+        if not buildings:
+            # No buildings found in radius → return radius_m as conservative estimate
+            dist_m = float(radius_m)
+            found_count = 0
+        else:
+            # Compute distance to nearest building centroid via bounding box midpoint
+            min_dist_m = float("inf")
+            for bldg in buildings:
+                bounds = bldg.get("bounds")
+                if not bounds:
+                    continue
+                c_lat = (bounds["minlat"] + bounds["maxlat"]) / 2.0
+                c_lon = (bounds["minlon"] + bounds["maxlon"]) / 2.0
+                d_km = haversine_distance(lat, lon, c_lat, c_lon)
+                d_m = d_km * 1000.0
+                if d_m < min_dist_m:
+                    min_dist_m = d_m
+            dist_m = round(min_dist_m, 1) if min_dist_m < float("inf") else float(radius_m)
+            found_count = len(buildings)
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        transformation = (
+            f"Nearest building centroid (bounding-box midpoint) from {found_count} "
+            f"OSM way[building] features within {radius_m}m; haversine distance = {dist_m}m"
+        )
+
+        meta = {
+            "unit": "m",
+            "source": OSM_SOURCE,
+            "resolution": OSM_RESOLUTION,
+            "data_date": OSM_DATA_DATE,
+            "retrieved_at": now_iso,
+            "transformation": transformation,
+        }
+
+        cache_feature(
+            factor="building_distance",
+            lat=lat,
+            lon=lon,
+            value=dist_m,
+            unit="m",
+            source=OSM_SOURCE,
+            resolution=OSM_RESOLUTION,
+            data_date=OSM_DATA_DATE,
+            retrieved_at=now_iso,
+            transformation=transformation,
+            db_path=target_db,
+            name=name,
+        )
+
+        return dist_m, meta, None
+
+    except (requests.RequestException, ValueError, KeyError):
+        return (
+            None,
+            None,
+            "Live building_distance data from OpenStreetMap was unavailable; fell back to demo/sample data.",
+        )
+
+
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate the great-circle distance between two points in kilometers."""
     r = 6371.0  # Earth radius in kilometers
@@ -342,16 +961,19 @@ def fetch_location_environmental_data(
     csv_path: Optional[str] = None,
     max_distance_km: float = 50.0,
     use_live_rainfall: Optional[bool] = None,
+    use_live_slope: Optional[bool] = None,
+    use_live_soil: Optional[bool] = None,
+    use_live_osm: Optional[bool] = None,
     db_path: Optional[str] = None,
     staleness_hours: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Fetch environmental values and metadata for a given coordinate or location name.
     
-    If use_live_rainfall is True, annual_rainfall is fetched from NASA POWER with SQLite
-    caching (falling back to CSV on failure/timeout). All other factors (slope,
-    soil_infiltration, open_space, building_distance) stay from the CSV.
-    When use_live_rainfall is False, behaviour is exactly as default (CSV only).
+    If use_live_rainfall is True, annual_rainfall is fetched from NASA POWER.
+    If use_live_slope is True, slope is fetched from Open-Meteo elevation.
+    All other factors stay from the CSV (or fall back to CSV on live failure/timeout).
+    When all live flags are False, behaviour is exactly as default (CSV only).
     """
     if use_live_rainfall is None:
         try:
@@ -362,6 +984,36 @@ def fetch_location_environmental_data(
                 use_live_rainfall = getattr(Config, "USE_LIVE_RAINFALL", False)
         except (RuntimeError, ImportError):
             use_live_rainfall = getattr(Config, "USE_LIVE_RAINFALL", False)
+
+    if use_live_slope is None:
+        try:
+            from flask import current_app
+            if current_app:
+                use_live_slope = current_app.config.get("USE_LIVE_SLOPE", False)
+            else:
+                use_live_slope = getattr(Config, "USE_LIVE_SLOPE", False)
+        except (RuntimeError, ImportError):
+            use_live_slope = getattr(Config, "USE_LIVE_SLOPE", False)
+
+    if use_live_soil is None:
+        try:
+            from flask import current_app
+            if current_app:
+                use_live_soil = current_app.config.get("USE_LIVE_SOIL", False)
+            else:
+                use_live_soil = getattr(Config, "USE_LIVE_SOIL", False)
+        except (RuntimeError, ImportError):
+            use_live_soil = getattr(Config, "USE_LIVE_SOIL", False)
+
+    if use_live_osm is None:
+        try:
+            from flask import current_app
+            if current_app:
+                use_live_osm = current_app.config.get("USE_LIVE_OSM", False)
+            else:
+                use_live_osm = getattr(Config, "USE_LIVE_OSM", False)
+        except (RuntimeError, ImportError):
+            use_live_osm = getattr(Config, "USE_LIVE_OSM", False)
 
     if staleness_hours is None:
         try:
@@ -471,6 +1123,93 @@ def fetch_location_environmental_data(
             if matched_record and values.get("annual_rainfall") is not None:
                 metadata["annual_rainfall"]["source"] = DEMO_SOURCE
 
+    # If live slope flag is enabled: fetch Open-Meteo elevation for slope
+    live_slope_used = False
+    if use_live_slope:
+        live_slope_val, live_slope_meta, live_slope_warn = fetch_open_meteo_slope(
+            lat=lat,
+            lon=lon,
+            db_path=db_path,
+            staleness_hours=staleness_hours,
+            timeout=10.0,
+            name=name or (matched_record.get("name") if matched_record else None),
+        )
+        if live_slope_val is not None and live_slope_meta is not None:
+            values["slope"] = live_slope_val
+            metadata["slope"] = live_slope_meta
+            live_slope_used = True
+        else:
+            # Fallback to CSV value (already in values["slope"])
+            if live_slope_warn:
+                warnings.append(live_slope_warn)
+            if matched_record and values.get("slope") is not None:
+                metadata["slope"]["source"] = DEMO_SOURCE
+
+    # If live soil flag is enabled: fetch SoilGrids texture → infiltration estimate
+    live_soil_used = False
+    if use_live_soil:
+        live_soil_val, live_soil_meta, live_soil_warn = fetch_soilgrids_infiltration(
+            lat=lat,
+            lon=lon,
+            db_path=db_path,
+            staleness_hours=staleness_hours,
+            timeout=10.0,
+            name=name or (matched_record.get("name") if matched_record else None),
+        )
+        if live_soil_val is not None and live_soil_meta is not None:
+            values["soil_infiltration"] = live_soil_val
+            metadata["soil_infiltration"] = live_soil_meta
+            live_soil_used = True
+        else:
+            # Fallback to CSV value (already in values["soil_infiltration"])
+            if live_soil_warn:
+                warnings.append(live_soil_warn)
+            if matched_record and values.get("soil_infiltration") is not None:
+                metadata["soil_infiltration"]["source"] = DEMO_SOURCE
+
+    # If live OSM flag is enabled: fetch open_space and building_distance from Overpass
+    live_osm_used = False
+    if use_live_osm:
+        loc_name_hint = name or (matched_record.get("name") if matched_record else None)
+
+        # open_space
+        osm_os_val, osm_os_meta, osm_os_warn = fetch_osm_open_space(
+            lat=lat,
+            lon=lon,
+            db_path=db_path,
+            staleness_hours=staleness_hours,
+            timeout=10.0,
+            name=loc_name_hint,
+        )
+        if osm_os_val is not None and osm_os_meta is not None:
+            values["open_space"] = osm_os_val
+            metadata["open_space"] = osm_os_meta
+            live_osm_used = True
+        else:
+            if osm_os_warn:
+                warnings.append(osm_os_warn)
+            if matched_record and values.get("open_space") is not None:
+                metadata["open_space"]["source"] = DEMO_SOURCE
+
+        # building_distance
+        osm_bd_val, osm_bd_meta, osm_bd_warn = fetch_osm_building_distance(
+            lat=lat,
+            lon=lon,
+            db_path=db_path,
+            staleness_hours=staleness_hours,
+            timeout=10.0,
+            name=loc_name_hint,
+        )
+        if osm_bd_val is not None and osm_bd_meta is not None:
+            values["building_distance"] = osm_bd_val
+            metadata["building_distance"] = osm_bd_meta
+            live_osm_used = True
+        else:
+            if osm_bd_warn:
+                warnings.append(osm_bd_warn)
+            if matched_record and values.get("building_distance") is not None:
+                metadata["building_distance"]["source"] = DEMO_SOURCE
+
     return {
         "name": name or (matched_record.get("name") if matched_record else None),
         "latitude": lat,
@@ -481,4 +1220,7 @@ def fetch_location_environmental_data(
         "metadata": metadata,
         "warnings": warnings,
         "live_rainfall_used": live_rainfall_used,
+        "live_slope_used": live_slope_used,
+        "live_soil_used": live_soil_used,
+        "live_osm_used": live_osm_used,
     }
