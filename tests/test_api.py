@@ -267,3 +267,81 @@ def test_auto_seeding_on_startup_when_db_missing(tmp_path):
         adaptations = res.get_json()
         assert any(a["id"] == "rain_garden" for a in adaptations)
 
+
+def test_config_wiring_suitable_min_changes_status(tmp_path):
+    """Verify that changing app.config['SUITABLE_MIN'] changes assessment status from suitable to conditional."""
+    test_db = str(tmp_path / "test_cfg_suitable.db")
+    payload = {
+        "adaptation_id": "rain_garden",
+        "reference_location": {
+            "name": "Location A",
+            "latitude": 19.10,
+            "longitude": 73.00,
+            "factors": {"soil_infiltration": 30.0, "slope": 3.0, "annual_rainfall": 1200.0, "open_space": 1.0, "building_distance": 5.0},
+        },
+        "target_location": {
+            "name": "Location B",
+            "latitude": 20.08,
+            "longitude": 74.11,
+            "factors": {"soil_infiltration": 28.0, "slope": 4.0, "annual_rainfall": 1100.0, "open_space": 1.0, "building_distance": 6.0},
+        },
+    }
+
+    # Standard config: SUITABLE_MIN=0.75 -> status is "suitable"
+    app_default = create_app({"DATABASE_PATH": test_db, "SUITABLE_MIN": 0.75, "TESTING": True})
+    with app_default.test_client() as c:
+        res = c.post("/api/assessments", json=payload)
+        assert res.status_code == 201
+        data = res.get_json()
+        assert data["status"] == "suitable"
+        assert data["suitable_min"] == 0.75
+
+    # Strict config: SUITABLE_MIN=1.05 -> score (~1.0) < 1.05 -> status becomes "conditional"
+    app_strict = create_app({"DATABASE_PATH": test_db, "SUITABLE_MIN": 1.05, "TESTING": True})
+    with app_strict.test_client() as c:
+        res = c.post("/api/assessments", json=payload)
+        assert res.status_code == 201
+        data = res.get_json()
+        assert data["status"] == "conditional"
+        assert data["suitable_min"] == 1.05
+
+
+def test_config_wiring_max_missing_weight_changes_status(tmp_path):
+    """Verify that lowering app.config['MAX_MISSING_WEIGHT'] changes assessment status to insufficient_data."""
+    test_db = str(tmp_path / "test_cfg_missing.db")
+    # building_distance has weight 0.10. If missing, unknown weight = 0.10
+    payload = {
+        "adaptation_id": "rain_garden",
+        "reference_location": {
+            "name": "Location A",
+            "latitude": 19.10,
+            "longitude": 73.00,
+            "factors": {"soil_infiltration": 30.0, "slope": 3.0, "annual_rainfall": 1200.0, "open_space": 1.0, "building_distance": 5.0},
+        },
+        "target_location": {
+            "name": "Location B",
+            "latitude": 20.08,
+            "longitude": 74.11,
+            "factors": {"soil_infiltration": 28.0, "slope": 4.0, "annual_rainfall": 1100.0, "open_space": 1.0, "building_distance": None},
+        },
+    }
+
+    # Default MAX_MISSING_WEIGHT=0.30: 0.10 <= 0.30 -> conditional
+    app_default = create_app({"DATABASE_PATH": test_db, "MAX_MISSING_WEIGHT": 0.30, "TESTING": True})
+    with app_default.test_client() as c:
+        res = c.post("/api/assessments", json=payload)
+        assert res.status_code == 201
+        data = res.get_json()
+        assert data["status"] == "conditional"
+        assert data["max_missing_weight"] == 0.30
+
+    # Strict MAX_MISSING_WEIGHT=0.05: 0.10 > 0.05 -> insufficient_data
+    app_strict = create_app({"DATABASE_PATH": test_db, "MAX_MISSING_WEIGHT": 0.05, "TESTING": True})
+    with app_strict.test_client() as c:
+        res = c.post("/api/assessments", json=payload)
+        assert res.status_code == 201
+        data = res.get_json()
+        assert data["status"] == "insufficient_data"
+        assert data["max_missing_weight"] == 0.05
+
+
