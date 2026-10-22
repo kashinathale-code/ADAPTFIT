@@ -55,15 +55,60 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
     # Register blueprints
     app.register_blueprint(api_bp)
 
+    def get_seed_adaptation_data():
+        try:
+            p = app.config.get("DATABASE_PATH", Config.DATABASE_PATH)
+            conn = sqlite3.connect(p, timeout=30.0)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT id, name, description, evidence_source FROM adaptations WHERE id='rain_garden'")
+            adapt = cur.fetchone()
+            cur.execute("SELECT factor, min_value, max_value, unit, weight, is_critical FROM adaptation_requirements WHERE adaptation_id='rain_garden' ORDER BY id ASC")
+            req_rows = cur.fetchall()
+            conn.close()
+            from backend.compatibility_engine import Requirement, _requirement_summary
+            thresholds = {}
+            for r in req_rows:
+                req_obj = Requirement(
+                    factor=r["factor"],
+                    min_value=r["min_value"],
+                    max_value=r["max_value"],
+                    unit=r["unit"] or "",
+                    is_critical=bool(r["is_critical"]),
+                )
+                summ = _requirement_summary(req_obj)
+                thresholds[r["factor"]] = f"{summ} (critical)" if r["is_critical"] else summ
+            return dict(adapt) if adapt else {}, thresholds
+        except Exception:
+            return {}, {}
+
     @app.route("/")
     def index():
         """Dashboard page."""
-        return render_template("index.html")
+        adapt, thresholds = get_seed_adaptation_data()
+        max_missing_pct = int(round(float(app.config.get("MAX_MISSING_WEIGHT", Config.MAX_MISSING_WEIGHT)) * 100))
+        suitable_min = float(app.config.get("SUITABLE_MIN", Config.SUITABLE_MIN))
+        return render_template(
+            "index.html",
+            adaptation=adapt,
+            thresholds=thresholds,
+            max_missing_pct=max_missing_pct,
+            suitable_min=suitable_min,
+        )
 
     @app.route("/new")
     def new_assessment_page():
         """New Assessment page with Leaflet map and preview table."""
-        return render_template("assessment.html")
+        adapt, thresholds = get_seed_adaptation_data()
+        max_missing_pct = int(round(float(app.config.get("MAX_MISSING_WEIGHT", Config.MAX_MISSING_WEIGHT)) * 100))
+        suitable_min = float(app.config.get("SUITABLE_MIN", Config.SUITABLE_MIN))
+        return render_template(
+            "assessment.html",
+            adaptation=adapt,
+            thresholds=thresholds,
+            max_missing_pct=max_missing_pct,
+            suitable_min=suitable_min,
+        )
 
     @app.route("/results")
     @app.route("/results/<int:assessment_id>")

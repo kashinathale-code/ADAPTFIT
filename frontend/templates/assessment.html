@@ -5,15 +5,15 @@
 {% block content %}
 <div class="assessment-page-layout">
 
-  <!-- Header Banner with Demo Notice -->
+  <!-- Header Banner with Dynamic Data Notice -->
   <div class="page-top-banner">
     <div>
       <h1 class="page-heading">New Transferability Assessment</h1>
       <p class="page-subheading">Select reference site (Location A) and prospective site (Location B) to evaluate feasibility.</p>
     </div>
-    <div class="demo-pill-highlight">
+    <div class="demo-pill-highlight" id="newAssessmentDataBadge">
       <span class="pulse-indicator"></span>
-      <strong>Sample data for demo, not live</strong>
+      <strong id="newAssessmentBadgeText">Checking data sources...</strong>
     </div>
   </div>
 
@@ -186,9 +186,9 @@
         <div class="preview-table-header">
           <div>
             <h3 class="card-title">Environmental Data Preview</h3>
-            <span class="card-subtitle">Values fetched from sample dataset for selected coordinates.</span>
+            <span class="card-subtitle">Values fetched from dataset or live sources for selected coordinates.</span>
           </div>
-          <span class="demo-badge-inline">Sample data for demo, not live</span>
+          <span class="demo-badge-inline" id="previewTableHeaderBadge">Checking data sources...</span>
         </div>
 
         <div class="table-responsive">
@@ -209,41 +209,41 @@
                 <td><strong>Soil Infiltration</strong></td>
                 <td class="col-center"><span class="badge-unknown">Unknown</span></td>
                 <td class="col-center"><span class="badge-unknown">Unknown</span></td>
-                <td><span class="text-muted">Sample CSV</span></td>
-                <td><span class="text-muted">Unspecified</span></td>
-                <td><span class="rule-tag">min 12.7 mm/hr (critical)</span></td>
+                <td><span class="text-muted">Loading...</span></td>
+                <td><span class="text-muted">Loading...</span></td>
+                <td><span class="rule-tag">{{ thresholds.get('soil_infiltration', 'min 12.7 mm/hr (critical)') }}</span></td>
               </tr>
               <tr>
                 <td><strong>Ground Slope</strong></td>
                 <td class="col-center"><span class="badge-unknown">Unknown</span></td>
                 <td class="col-center"><span class="badge-unknown">Unknown</span></td>
-                <td><span class="text-muted">Sample CSV</span></td>
-                <td><span class="text-muted">Unspecified</span></td>
-                <td><span class="rule-tag">max 8.0 % (critical)</span></td>
+                <td><span class="text-muted">Loading...</span></td>
+                <td><span class="text-muted">Loading...</span></td>
+                <td><span class="rule-tag">{{ thresholds.get('slope', 'max 8.0 % (critical)') }}</span></td>
               </tr>
               <tr>
                 <td><strong>Annual Rainfall</strong></td>
                 <td class="col-center"><span class="badge-unknown">Unknown</span></td>
                 <td class="col-center"><span class="badge-unknown">Unknown</span></td>
-                <td><span class="text-muted">Sample CSV</span></td>
-                <td><span class="text-muted">Unspecified</span></td>
-                <td><span class="rule-tag">600 &ndash; 2500 mm/yr</span></td>
+                <td><span class="text-muted">Loading...</span></td>
+                <td><span class="text-muted">Loading...</span></td>
+                <td><span class="rule-tag">{{ thresholds.get('annual_rainfall', '600 – 2500 mm/yr') }}</span></td>
               </tr>
               <tr>
                 <td><strong>Open Space</strong></td>
                 <td class="col-center"><span class="badge-unknown">Unknown</span></td>
                 <td class="col-center"><span class="badge-unknown">Unknown</span></td>
-                <td><span class="text-muted">Sample CSV</span></td>
-                <td><span class="text-muted">Unspecified</span></td>
-                <td><span class="rule-tag">Present (binary)</span></td>
+                <td><span class="text-muted">Loading...</span></td>
+                <td><span class="text-muted">Loading...</span></td>
+                <td><span class="rule-tag">{{ thresholds.get('open_space', 'Present (binary)') }}</span></td>
               </tr>
               <tr>
                 <td><strong>Building Distance</strong></td>
                 <td class="col-center"><span class="badge-unknown">Unknown</span></td>
                 <td class="col-center"><span class="badge-unknown">Unknown</span></td>
-                <td><span class="text-muted">Sample CSV</span></td>
-                <td><span class="text-muted">Unspecified</span></td>
-                <td><span class="rule-tag">min 3.0 m</span></td>
+                <td><span class="text-muted">Loading...</span></td>
+                <td><span class="text-muted">Loading...</span></td>
+                <td><span class="rule-tag">{{ thresholds.get('building_distance', 'min 3.0 m') }}</span></td>
               </tr>
             </tbody>
           </table>

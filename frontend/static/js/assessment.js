@@ -173,11 +173,15 @@ function onManualCoordChange(type) {
 /**
  * Fetch available adaptations from API
  */
+let adaptationsList = [];
+let currentThresholds = {};
+
 async function loadAdaptations() {
   try {
     const res = await fetch("/api/adaptations");
     if (!res.ok) return;
     const adaptations = await res.json();
+    adaptationsList = adaptations;
     const select = document.getElementById("adaptationSelect");
     if (select && adaptations.length > 0) {
       select.innerHTML = "";
@@ -188,6 +192,15 @@ async function loadAdaptations() {
         select.appendChild(opt);
       });
       document.getElementById("adaptationDesc").textContent = adaptations[0].description || "";
+      currentThresholds = adaptations[0].thresholds || {};
+      select.addEventListener("change", (e) => {
+        const sel = adaptationsList.find(item => item.id === e.target.value);
+        if (sel) {
+          document.getElementById("adaptationDesc").textContent = sel.description || "";
+          currentThresholds = sel.thresholds || {};
+          updateEnvironmentalPreview();
+        }
+      });
     }
   } catch (err) {
     console.error("Failed to fetch adaptations:", err);
@@ -232,11 +245,11 @@ function renderPreviewTable(dataA, dataB) {
   if (!tbody) return;
 
   const factorsConfig = [
-    { key: "soil_infiltration", label: "Soil Infiltration", rule: "min 12.7 mm/hr (critical)" },
-    { key: "slope", label: "Ground Slope", rule: "max 8.0 % (critical)" },
-    { key: "annual_rainfall", label: "Annual Rainfall", rule: "600 – 2500 mm/yr" },
-    { key: "open_space", label: "Open Space", rule: "Present (site survey)" },
-    { key: "building_distance", label: "Building Distance", rule: "min 3.0 m" }
+    { key: "soil_infiltration", label: "Soil Infiltration" },
+    { key: "slope", label: "Ground Slope" },
+    { key: "annual_rainfall", label: "Annual Rainfall" },
+    { key: "open_space", label: "Open Space" },
+    { key: "building_distance", label: "Building Distance" }
   ];
 
   tbody.innerHTML = "";
@@ -249,17 +262,17 @@ function renderPreviewTable(dataA, dataB) {
     const ovA = getOverrideVal('a', cfg.key);
     const ovB = getOverrideVal('b', cfg.key);
 
-    const valA = ovA !== null ? ovA : (aFactor ? aFactor.value : null);
-    const valB = ovB !== null ? ovB : (bFactor ? bFactor.value : null);
+    const valA = ovA != null ? ovA : (aFactor ? aFactor.value : null);
+    const valB = ovB != null ? ovB : (bFactor ? bFactor.value : null);
 
     const unit = (bFactor && bFactor.unit) ? bFactor.unit : ((aFactor && aFactor.unit) ? aFactor.unit : "");
-    const srcA = (aFactor && aFactor.source) ? aFactor.source : "Demo value";
-    const srcB = (bFactor && bFactor.source) ? bFactor.source : "Demo value";
-    const resA = (aFactor && aFactor.resolution) ? aFactor.resolution : "n/a (demo)";
-    const resB = (bFactor && bFactor.resolution) ? bFactor.resolution : "n/a (demo)";
+    const srcA = (aFactor && aFactor.source) ? aFactor.source : (aFactor?.value != null ? "Demo value" : "Unknown");
+    const srcB = (bFactor && bFactor.source) ? bFactor.source : (bFactor?.value != null ? "Demo value" : "Unknown");
+    const resA = (aFactor && aFactor.resolution) ? aFactor.resolution : (aFactor?.value != null ? "n/a (demo)" : "Unknown");
+    const resB = (bFactor && bFactor.resolution) ? bFactor.resolution : (bFactor?.value != null ? "n/a (demo)" : "Unknown");
 
     function getProvenanceLabel(src) {
-      if (!src) return "Demo value";
+      if (!src || src === "Unknown") return "Unknown";
       if (src.startsWith("Live:") || src.startsWith("Estimated (proxy):")) {
         return src;
       }
@@ -268,22 +281,22 @@ function renderPreviewTable(dataA, dataB) {
 
     const labelA = getProvenanceLabel(srcA);
     const labelB = getProvenanceLabel(srcB);
-    const isSpecialA = labelA !== "Demo value";
-    const isSpecialB = labelB !== "Demo value";
-    const provClassA = (srcA || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcA || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : 'badge-provenance-demo');
-    const provClassB = (srcB || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcB || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : 'badge-provenance-demo');
+    const provClassA = (srcA || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcA || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : (labelA === "Unknown" ? 'badge-unknown' : 'badge-provenance-demo'));
+    const provClassB = (srcB || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcB || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : (labelB === "Unknown" ? 'badge-unknown' : 'badge-provenance-demo'));
 
-    const badgeA = valA !== null
+    const badgeA = valA != null
       ? `<div><strong>${valA}</strong> <small class="text-muted">${unit}</small></div><div class="preview-val-prov ${provClassA}">${escapeHtml(labelA)} &bull; ${escapeHtml(resA)}</div>`
       : `<span class="badge-unknown">Unknown</span>`;
 
-    const badgeB = valB !== null
+    const badgeB = valB != null
       ? `<div><strong>${valB}</strong> <small class="text-muted">${unit}</small></div><div class="preview-val-prov ${provClassB}">${escapeHtml(labelB)} &bull; ${escapeHtml(resB)}</div>`
       : `<span class="badge-unknown">Unknown</span>`;
 
-    const isLive = isSpecialB || isSpecialA;
-    const displaySource = isSpecialB ? labelB : (isSpecialA ? labelA : "Demo value");
-    const displayRes = isSpecialB ? resB : (isSpecialA ? resA : (resB || resA || "n/a (demo)"));
+    const displaySource = bFactor?.source ? bFactor.source : (aFactor?.source ? aFactor.source : (valB != null || valA != null ? "Demo value" : "Unknown"));
+    const displayRes = bFactor?.resolution ? bFactor.resolution : (aFactor?.resolution ? aFactor.resolution : (valB != null || valA != null ? "n/a (demo)" : "Unknown"));
+    const isLive = displaySource.startsWith("Live:") || displaySource.startsWith("Estimated (proxy):");
+
+    const ruleText = currentThresholds[cfg.key] || "Candidate requirement";
 
     const row = document.createElement("tr");
     row.innerHTML = `
@@ -292,7 +305,7 @@ function renderPreviewTable(dataA, dataB) {
       <td class="col-center">${badgeB}</td>
       <td><span class="${isLive ? 'badge-provenance-live' : 'text-muted'}">${escapeHtml(displaySource)}</span></td>
       <td><span class="text-muted">${escapeHtml(displayRes)}</span></td>
-      <td><span class="rule-tag">${cfg.rule}</span></td>
+      <td><span class="rule-tag">${escapeHtml(ruleText)}</span></td>
     `;
     tbody.appendChild(row);
   });
@@ -347,7 +360,7 @@ function updateHeaderDataBadge(dataA, dataB) {
   if (estimated.length > 0) parts.push(`Estimated: ${estimated.join(", ")}`);
   if (demo.length > 0) parts.push(`Demo: ${demo.join(", ")}`);
 
-  const text = parts.join(" | ");
+  const text = parts.join(" | ") || "Sample data for demo, not live";
   const isMixedOrLive = live.length > 0 || estimated.length > 0;
 
   const badgeText = document.getElementById("headerBadgeText");
@@ -368,7 +381,13 @@ function updateHeaderDataBadge(dataA, dataB) {
     }
   }
 
-  // Also update page-level demo pill badges
+  // Also update page-level demo pill badges and preview table header badge
+  const pageTopText = document.getElementById("newAssessmentBadgeText");
+  if (pageTopText) pageTopText.textContent = text;
+
+  const tableHeaderBadge = document.getElementById("previewTableHeaderBadge");
+  if (tableHeaderBadge) tableHeaderBadge.textContent = text;
+
   const bannerBadges = document.querySelectorAll(".demo-pill-highlight, .demo-badge-inline");
   bannerBadges.forEach(b => {
     const strong = b.querySelector("strong");
@@ -484,10 +503,10 @@ async function submitAssessment() {
   // Collect manual overrides if provided
   ["soil_infiltration", "slope", "annual_rainfall", "open_space", "building_distance"].forEach(k => {
     const aVal = getOverrideVal('a', k);
-    if (aVal !== null) payload.reference_location.factors[k] = aVal;
+    if (aVal != null) payload.reference_location.factors[k] = aVal;
 
     const bVal = getOverrideVal('b', k);
-    if (bVal !== null) payload.target_location.factors[k] = bVal;
+    if (bVal != null) payload.target_location.factors[k] = bVal;
   });
 
   try {

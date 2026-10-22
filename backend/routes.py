@@ -107,12 +107,53 @@ def _get_db_connection() -> sqlite3.Connection:
 
 @api_bp.route("/adaptations", methods=["GET"])
 def get_adaptations():
-    """List available adaptation interventions from the knowledge base."""
+    """List available adaptation interventions from the knowledge base with their criteria."""
     conn = _get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT id, name, description, evidence_source FROM adaptations")
     rows = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT adaptation_id, factor, min_value, max_value, unit, weight,
+               is_critical, transfer_tolerance, tolerance_type, evidence, rule_version
+        FROM adaptation_requirements
+        ORDER BY id ASC
+        """
+    )
+    req_rows = cur.fetchall()
     conn.close()
+
+    from backend.compatibility_engine import Requirement, _requirement_summary
+
+    reqs_by_adapt: Dict[str, List[Dict[str, Any]]] = {}
+    for r in req_rows:
+        req_obj = Requirement(
+            factor=r["factor"],
+            min_value=r["min_value"],
+            max_value=r["max_value"],
+            unit=r["unit"] or "",
+            is_critical=bool(r["is_critical"]),
+        )
+        summ = _requirement_summary(req_obj)
+        crit_str = " (critical)" if r["is_critical"] else ""
+        r_dict = {
+            "factor": r["factor"],
+            "min_value": r["min_value"],
+            "max_value": r["max_value"],
+            "unit": r["unit"],
+            "weight": r["weight"],
+            "is_critical": bool(r["is_critical"]),
+            "transfer_tolerance": r["transfer_tolerance"],
+            "tolerance_type": r["tolerance_type"],
+            "evidence": r["evidence"],
+            "rule_version": r["rule_version"],
+            "threshold": f"{summ}{crit_str}",
+        }
+        reqs_by_adapt.setdefault(r["adaptation_id"], []).append(r_dict)
+
+    suitable_min = float(current_app.config.get("SUITABLE_MIN", Config.SUITABLE_MIN))
+    max_missing_weight = float(current_app.config.get("MAX_MISSING_WEIGHT", Config.MAX_MISSING_WEIGHT))
 
     adaptations = [
         {
@@ -120,6 +161,12 @@ def get_adaptations():
             "name": row["name"],
             "description": row["description"],
             "evidence_source": row["evidence_source"],
+            "requirements": reqs_by_adapt.get(row["id"], []),
+            "thresholds": {
+                r["factor"]: r["threshold"] for r in reqs_by_adapt.get(row["id"], [])
+            },
+            "suitable_min": suitable_min,
+            "max_missing_weight": max_missing_weight,
         }
         for row in rows
     ]
@@ -407,6 +454,8 @@ def create_assessment():
     # Response strictly matching TRD Section 7
     response_body = {
         "assessment_id": assessment_id,
+        "adaptation_id": adaptation_id,
+        "adaptation_name": adapt_row["name"],
         "reference_location": {
             "name": ref_name,
             "latitude": ref_lat,
@@ -474,10 +523,11 @@ def get_assessment(assessment_id: int):
 
     cur.execute(
         """
-        SELECT a.id, a.adaptation_id, a.status, a.score, a.created_at,
+        SELECT a.id, a.adaptation_id, ad.name AS adaptation_name, a.status, a.score, a.created_at,
                la.name AS a_name, la.latitude AS a_lat, la.longitude AS a_lon,
                lb.name AS b_name, lb.latitude AS b_lat, lb.longitude AS b_lon
         FROM assessments a
+        JOIN adaptations ad ON a.adaptation_id = ad.id
         JOIN locations la ON a.location_a_id = la.id
         JOIN locations lb ON a.location_b_id = lb.id
         WHERE a.id = ?
@@ -585,6 +635,7 @@ def get_assessment(assessment_id: int):
     response_body = {
         "assessment_id": row["id"],
         "adaptation_id": row["adaptation_id"],
+        "adaptation_name": row["adaptation_name"],
         "reference_location": {
             "name": row["a_name"],
             "latitude": float(row["a_lat"]) if row["a_lat"] is not None else None,

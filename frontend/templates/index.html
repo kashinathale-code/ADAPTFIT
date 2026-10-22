@@ -72,7 +72,7 @@
           </svg>
         </div>
         <h3>Critical Blocker Override</h3>
-        <p>If any critical requirement fails (e.g. soil infiltration &lt; 12.7 mm/hr or slope &gt; 8%), status is automatically marked <strong>Unsuitable</strong>, regardless of how high other scores are.</p>
+        <p>If any critical requirement fails (e.g. soil infiltration &lt; {{ thresholds.get('soil_infiltration', '12.7 mm/hr') }} or slope &gt; {{ thresholds.get('slope', '8.0 %') }}), status is automatically marked <strong>Unsuitable</strong>, regardless of how high other scores are.</p>
         <span class="card-badge">candidate, unverified rules</span>
       </div>
 
@@ -99,8 +99,8 @@
           </svg>
         </div>
         <h3>Strict Missing Data Handling</h3>
-        <p>Values are never fabricated. Missing inputs are treated as &ldquo;Unknown&rdquo;. If any critical factor is unknown or over 30% of total factor weight is missing, the engine withholds scoring with <strong>Insufficient Data</strong>.</p>
-        <span class="card-badge">Sample data for demo, not live</span>
+        <p>Values are never fabricated. Missing inputs are treated as &ldquo;Unknown&rdquo;. If any critical factor is unknown or over {{ max_missing_pct }}% of total factor weight is missing, the engine withholds scoring with <strong>Insufficient Data</strong>.</p>
+        <span class="card-badge">Data Provenance Checked</span>
       </div>
     </div>
   </section>
@@ -111,19 +111,19 @@
       <div class="preview-header">
         <div>
           <span class="sub-label">Starter Intervention</span>
-          <h3 class="preview-title">Rain Garden (Urban Stormwater Infiltration)</h3>
+          <h3 class="preview-title">{{ adaptation.get('name', 'Rain Garden (Urban Stormwater Infiltration)') }}</h3>
         </div>
         <span class="badge-status-pill badge-candidate">candidate, unverified</span>
       </div>
       <p class="preview-desc">
-        A shallow vegetated depression engineered to capture and infiltrate runoff from impervious surfaces, dampening peak hydrographs and improving stormwater runoff quality.
+        {{ adaptation.get('description', 'A shallow vegetated depression engineered to capture and infiltrate runoff from impervious surfaces, dampening peak hydrographs and improving stormwater runoff quality.') }}
       </p>
       <div class="preview-criteria">
-        <div class="criteria-item"><strong>Soil Infiltration:</strong> min 12.7 mm/hr (critical)</div>
-        <div class="criteria-item"><strong>Slope:</strong> max 8.0 % (critical)</div>
-        <div class="criteria-item"><strong>Annual Rainfall:</strong> 600 – 2500 mm/yr</div>
-        <div class="criteria-item"><strong>Open Space:</strong> Present (site survey)</div>
-        <div class="criteria-item"><strong>Building Distance:</strong> min 3.0 m setback</div>
+        <div class="criteria-item"><strong>Soil Infiltration:</strong> {{ thresholds.get('soil_infiltration', 'min 12.7 mm/hr (critical)') }}</div>
+        <div class="criteria-item"><strong>Slope:</strong> {{ thresholds.get('slope', 'max 8.0 % (critical)') }}</div>
+        <div class="criteria-item"><strong>Annual Rainfall:</strong> {{ thresholds.get('annual_rainfall', '600 – 2500 mm/yr') }}</div>
+        <div class="criteria-item"><strong>Open Space:</strong> {{ thresholds.get('open_space', 'Present (site survey)') }}</div>
+        <div class="criteria-item"><strong>Building Distance:</strong> {{ thresholds.get('building_distance', 'min 3.0 m') }}</div>
       </div>
       <div class="preview-footer">
         <a href="{{ url_for('new_assessment_page') }}" class="btn btn-primary">

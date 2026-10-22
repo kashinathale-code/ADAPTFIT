@@ -99,8 +99,7 @@ function renderAssessment(data) {
   if (locBNameEl) locBNameEl.textContent = tgtLoc.name || "Location B";
 
   if (locACoordsEl) {
-    if (refLoc.latitude !== undefined && refLoc.latitude !== null &&
-        refLoc.longitude !== undefined && refLoc.longitude !== null) {
+    if (refLoc.latitude != null && refLoc.longitude != null) {
       locACoordsEl.textContent = `Lat: ${refLoc.latitude}, Lon: ${refLoc.longitude}`;
     } else {
       locACoordsEl.textContent = "Lat: --, Lon: --";
@@ -108,22 +107,28 @@ function renderAssessment(data) {
   }
 
   if (locBCoordsEl) {
-    if (tgtLoc.latitude !== undefined && tgtLoc.latitude !== null &&
-        tgtLoc.longitude !== undefined && tgtLoc.longitude !== null) {
+    if (tgtLoc.latitude != null && tgtLoc.longitude != null) {
       locBCoordsEl.textContent = `Lat: ${tgtLoc.latitude}, Lon: ${tgtLoc.longitude}`;
     } else {
       locBCoordsEl.textContent = "Lat: --, Lon: --";
     }
   }
 
+  // Set adaptation tag from API
+  const adaptTagEl = document.getElementById("adaptationTag");
+  if (adaptTagEl) {
+    const adaptName = data.adaptation_name || (data.adaptation_id ? data.adaptation_id.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Rain Garden");
+    adaptTagEl.textContent = `${adaptName} Assessment`;
+  }
+
   // 1. Status Banner
-  renderStatusBanner(data.status);
+  renderStatusBanner(data.status, data);
 
   // Update header badge listing which factors are currently live, estimated or demo
   updateHeaderDataBadge(data);
 
   // 2. Screening Score
-  renderScore(data.score, data.status);
+  renderScore(data.score, data.status, data);
 
   // 3. Factor Comparison Table
   renderFactorsTable(data.factors || []);
@@ -159,7 +164,7 @@ function renderAssessment(data) {
 /**
  * Render Large Status Banner
  */
-function renderStatusBanner(status) {
+function renderStatusBanner(status, data) {
   const banner = document.getElementById("statusBanner");
   const iconWrap = document.getElementById("statusIcon");
   const statusText = document.getElementById("statusText");
@@ -167,6 +172,8 @@ function renderStatusBanner(status) {
   const explanation = document.getElementById("statusExplanation");
 
   banner.className = "status-banner";
+
+  const maxMissingPct = data?.max_missing_weight != null ? Math.round(data.max_missing_weight * 100) : 30;
 
   const configs = {
     "suitable": {
@@ -194,7 +201,7 @@ function renderStatusBanner(status) {
       cls: "status-insufficient",
       badge: "INSUFFICIENT DATA",
       headline: "Data Gaps Prevent Comprehensive Screening",
-      explanation: "One or more critical parameters are unknown for the target site or missing factor weight exceeds the acceptable 30% threshold. Classification is withheld.",
+      explanation: `One or more critical parameters are unknown for the target site or missing factor weight exceeds the acceptable ${maxMissingPct}% threshold. Classification is withheld.`,
       icon: `<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`
     }
   };
@@ -210,13 +217,14 @@ function renderStatusBanner(status) {
 /**
  * Render Screening Score
  */
-function renderScore(score, status) {
+function renderScore(score, status, data) {
   const scoreVal = document.getElementById("scoreValueDisplay");
   const scoreDesc = document.getElementById("scoreDescription");
+  const maxMissingPct = data?.max_missing_weight != null ? Math.round(data.max_missing_weight * 100) : 30;
 
-  if (score === null || score === undefined || status === "insufficient_data") {
+  if (score == null || status === "insufficient_data") {
     scoreVal.textContent = "--";
-    scoreDesc.textContent = "Screening score is withheld when critical factors are unknown or missing data weight exceeds the 30% threshold.";
+    scoreDesc.textContent = `Screening score is withheld when critical factors are unknown or missing data weight exceeds the ${maxMissingPct}% threshold.`;
   } else {
     const formatted = typeof score === "number" ? score.toFixed(2) : score;
     scoreVal.textContent = formatted;
@@ -236,8 +244,8 @@ function renderFactorsTable(factors) {
   factors.forEach(f => {
     const label = f.factor.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 
-    const srcA = f.a_source || (f.a_value !== null ? (f.source || "Demo value") : "");
-    const resA = f.a_resolution || (f.a_value !== null ? (f.resolution || "n/a (demo)") : "");
+    const srcA = f.a_source || (f.a_value != null ? (f.source || "Demo value") : "");
+    const resA = f.a_resolution || (f.a_value != null ? (f.resolution || "n/a (demo)") : "");
     const srcB = f.b_source || f.source || "Demo value";
     const resB = f.b_resolution || f.resolution || "n/a (demo)";
 
@@ -256,11 +264,11 @@ function renderFactorsTable(factors) {
     const provClassA = (srcA || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcA || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : 'badge-provenance-demo');
     const provClassB = (srcB || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcB || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : 'badge-provenance-demo');
 
-    const subA = (f.a_value !== null && srcA) ? `<div class="preview-val-prov ${provClassA}">${escapeHtml(labelA)} &bull; ${escapeHtml(resA)}</div>` : "";
-    const subB = (f.b_value !== null && srcB) ? `<div class="preview-val-prov ${provClassB}">${escapeHtml(labelB)} &bull; ${escapeHtml(resB)}</div>` : "";
+    const subA = (f.a_value != null && srcA) ? `<div class="preview-val-prov ${provClassA}">${escapeHtml(labelA)} &bull; ${escapeHtml(resA)}</div>` : "";
+    const subB = (f.b_value != null && srcB) ? `<div class="preview-val-prov ${provClassB}">${escapeHtml(labelB)} &bull; ${escapeHtml(resB)}</div>` : "";
 
-    const valA = f.a_value !== null ? `<div><strong>${f.a_value}</strong></div>${subA}` : `<span class="badge-unknown">Unknown</span>`;
-    const valB = f.b_value !== null ? `<div><strong>${f.b_value}</strong></div>${subB}` : `<span class="badge-unknown">Unknown</span>`;
+    const valA = f.a_value != null ? `<div><strong>${f.a_value}</strong></div>${subA}` : `<span class="badge-unknown">Unknown</span>`;
+    const valB = f.b_value != null ? `<div><strong>${f.b_value}</strong></div>${subB}` : `<span class="badge-unknown">Unknown</span>`;
 
     // Status pill
     let statusBadge = "";
@@ -388,6 +396,9 @@ function updateHeaderDataBadge(data) {
       badgeContainer.classList.remove("mixed-live");
     }
   }
+
+  const resBadgeText = document.getElementById("resultsPageBadgeText");
+  if (resBadgeText) resBadgeText.textContent = text;
 
   // Also update page-level demo pill badges
   const bannerBadges = document.querySelectorAll(".demo-pill-highlight, .demo-badge-inline");

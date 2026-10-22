@@ -238,7 +238,8 @@ def test_frontend_new_assessment_page(client):
     html = res.get_data(as_text=True)
     assert "New Transferability Assessment" in html
     assert "leafletMap" in html
-    assert "Sample data for demo, not live" in html
+    assert "newAssessmentDataBadge" in html
+    assert "previewTableHeaderBadge" in html
     assert "candidate, unverified" in html
     assert "Run assessment" in html
 
