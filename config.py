@@ -35,6 +35,14 @@ class Config:
 
 
     # ------------------------------------------------------------------ #
+    # External HTTP requests                                               #
+    # ------------------------------------------------------------------ #
+    HTTP_USER_AGENT: str = os.environ.get(
+        "HTTP_USER_AGENT",
+        "ADAPTFIT/1.0 (Climate Adaptation Transferability Tool; https://github.com/adaptfit; contact: research@adaptfit.org)",
+    )
+
+    # ------------------------------------------------------------------ #
     # Caching                                                              #
     # ------------------------------------------------------------------ #
     CACHE_STALENESS_HOURS: int = int(os.environ.get("CACHE_STALENESS_HOURS", "24"))

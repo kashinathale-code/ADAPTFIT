@@ -75,7 +75,7 @@ def build_data_badge_label(factors_payload: List[Dict[str, Any]]) -> str:
         src_b = f.get("b_source") or f.get("source") or ""
         name = _FACTOR_DISPLAY_NAMES.get(key, key.replace("_", " "))
 
-        if src_a.startswith("Live:") or src_b.startswith("Live:"):
+        if src_a.startswith("Live") or src_b.startswith("Live"):
             live.append(name)
         elif src_a.startswith("Estimated (proxy):") or src_b.startswith("Estimated (proxy):"):
             estimated.append(name)
@@ -96,6 +96,49 @@ def build_data_badge_label(factors_payload: List[Dict[str, Any]]) -> str:
     return " | ".join(parts)
 
 
+def get_configured_badge_info(app_config=None) -> Dict[str, Any]:
+    """
+    Compute data badge text and status based on application configuration and active flags.
+    Used to make the dashboard header badge data-driven.
+    """
+    cfg = app_config if app_config is not None else Config
+
+    def _get_flag(key: str) -> bool:
+        if hasattr(cfg, "get"):
+            v = cfg.get(key, getattr(Config, key, False))
+        else:
+            v = getattr(cfg, key, getattr(Config, key, False))
+        if isinstance(v, str):
+            return v.lower() == "true"
+        return bool(v)
+
+    live_rain = _get_flag("USE_LIVE_RAINFALL")
+    live_slope = _get_flag("USE_LIVE_SLOPE")
+    live_soil = _get_flag("USE_LIVE_SOIL")
+    live_osm = _get_flag("USE_LIVE_OSM")
+
+    factors_payload = [
+        {"factor": "annual_rainfall", "source": "Live: NASA POWER" if live_rain else "Demo value"},
+        {"factor": "slope", "source": "Live: Open-Meteo (Copernicus DEM)" if live_slope else "Demo value"},
+        {"factor": "soil_infiltration", "source": "Estimated (proxy): SoilGrids v2.0" if live_soil else "Demo value"},
+        {"factor": "open_space", "source": "Live: OpenStreetMap (Overpass)" if live_osm else "Demo value"},
+        {"factor": "building_distance", "source": "Live: OpenStreetMap (Overpass)" if live_osm else "Demo value"},
+    ]
+    label = build_data_badge_label(factors_payload)
+    is_live = any([live_rain, live_slope, live_soil, live_osm])
+    return {
+        "text": label,
+        "is_live": is_live,
+        "badge_class": "mixed-live" if is_live else "",
+        "live_flags": {
+            "rainfall": live_rain,
+            "slope": live_slope,
+            "soil": live_soil,
+            "osm": live_osm,
+        },
+    }
+
+
 def _get_db_connection() -> sqlite3.Connection:
     """Return a connection to the SQLite database with Row row_factory."""
     db_path = current_app.config.get("DATABASE_PATH", Config.DATABASE_PATH)
@@ -103,6 +146,12 @@ def _get_db_connection() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+@api_bp.route("/data-status", methods=["GET"])
+def get_data_status():
+    """Return data-driven header badge status and active live flags."""
+    return jsonify(get_configured_badge_info(current_app.config))
 
 
 # --------------------------------------------------------------------------- #

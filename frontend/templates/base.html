@@ -43,9 +43,9 @@
         <a href="{{ url_for('history_page') }}" class="nav-link {% if request.path.startswith('/history') %}active{% endif %}">History</a>
       </nav>
 
-      <div class="demo-badge-header" id="headerDataBadge">
+      <div class="demo-badge-header {% if header_badge_class %}{{ header_badge_class }}{% endif %}" id="headerDataBadge">
         <span class="badge-dot" id="headerBadgeDot"></span>
-        <span id="headerBadgeText">Sample data for demo, not live</span>
+        <span id="headerBadgeText">{{ header_badge_text or "Sample data for demo, not live" }}</span>
       </div>
     </div>
   </header>
@@ -80,6 +80,27 @@
 
   <!-- Leaflet JS (Self-hosted 1.9.4) -->
   <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+      // Keep header badge synced with /api/data-status on dashboard and other pages
+      if (!window.location.pathname.startsWith("/results")) {
+        fetch("/api/data-status")
+          .then(function(res) { if (res.ok) return res.json(); })
+          .then(function(data) {
+            if (data && data.text) {
+              var txt = document.getElementById("headerBadgeText");
+              if (txt) txt.textContent = data.text;
+              var badge = document.getElementById("headerDataBadge");
+              if (badge) {
+                if (data.is_live) badge.classList.add("mixed-live");
+                else badge.classList.remove("mixed-live");
+              }
+            }
+          })
+          .catch(function() {});
+      }
+    });
+  </script>
   {% block extra_scripts %}{% endblock %}
 </body>
 </html>

@@ -273,7 +273,7 @@ function renderPreviewTable(dataA, dataB) {
 
     function getProvenanceLabel(src) {
       if (!src || src === "Unknown") return "Unknown";
-      if (src.startsWith("Live:") || src.startsWith("Estimated (proxy):")) {
+      if (src.startsWith("Live") || src.startsWith("Estimated (proxy):")) {
         return src;
       }
       return "Demo value";
@@ -281,8 +281,8 @@ function renderPreviewTable(dataA, dataB) {
 
     const labelA = getProvenanceLabel(srcA);
     const labelB = getProvenanceLabel(srcB);
-    const provClassA = (srcA || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcA || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : (labelA === "Unknown" ? 'badge-unknown' : 'badge-provenance-demo'));
-    const provClassB = (srcB || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcB || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : (labelB === "Unknown" ? 'badge-unknown' : 'badge-provenance-demo'));
+    const provClassA = (srcA || "").startsWith("Live") ? 'badge-provenance-live' : ((srcA || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : (labelA === "Unknown" ? 'badge-unknown' : 'badge-provenance-demo'));
+    const provClassB = (srcB || "").startsWith("Live") ? 'badge-provenance-live' : ((srcB || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : (labelB === "Unknown" ? 'badge-unknown' : 'badge-provenance-demo'));
 
     const badgeA = valA != null
       ? `<div><strong>${valA}</strong> <small class="text-muted">${unit}</small></div><div class="preview-val-prov ${provClassA}">${escapeHtml(labelA)} &bull; ${escapeHtml(resA)}</div>`
@@ -294,7 +294,7 @@ function renderPreviewTable(dataA, dataB) {
 
     const displaySource = bFactor?.source ? bFactor.source : (aFactor?.source ? aFactor.source : (valB != null || valA != null ? "Demo value" : "Unknown"));
     const displayRes = bFactor?.resolution ? bFactor.resolution : (aFactor?.resolution ? aFactor.resolution : (valB != null || valA != null ? "n/a (demo)" : "Unknown"));
-    const isLive = displaySource.startsWith("Live:") || displaySource.startsWith("Estimated (proxy):");
+    const isLive = displaySource.startsWith("Live") || displaySource.startsWith("Estimated (proxy):");
 
     const ruleText = currentThresholds[cfg.key] || "Candidate requirement";
 
@@ -346,7 +346,7 @@ function updateHeaderDataBadge(dataA, dataB) {
     const srcA = dataA?.factors?.[k]?.source || "";
     const srcB = dataB?.factors?.[k]?.source || "";
     const name = factorNames[k] || k;
-    if (srcA.startsWith("Live:") || srcB.startsWith("Live:")) {
+    if (srcA.startsWith("Live") || srcB.startsWith("Live")) {
       live.push(name);
     } else if (srcA.startsWith("Estimated (proxy):") || srcB.startsWith("Estimated (proxy):")) {
       estimated.push(name);

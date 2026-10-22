@@ -262,7 +262,7 @@ function renderFactorsTable(factors) {
 
     function getProvenanceLabel(src) {
       if (!src) return "Demo value";
-      if (src.startsWith("Live:") || src.startsWith("Estimated (proxy):")) {
+      if (src.startsWith("Live") || src.startsWith("Estimated (proxy):")) {
         return src;
       }
       return "Demo value";
@@ -272,8 +272,8 @@ function renderFactorsTable(factors) {
     const labelB = getProvenanceLabel(srcB);
     const isSpecialA = labelA !== "Demo value";
     const isSpecialB = labelB !== "Demo value";
-    const provClassA = (srcA || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcA || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : 'badge-provenance-demo');
-    const provClassB = (srcB || "").startsWith("Live:") ? 'badge-provenance-live' : ((srcB || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : 'badge-provenance-demo');
+    const provClassA = (srcA || "").startsWith("Live") ? 'badge-provenance-live' : ((srcA || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : 'badge-provenance-demo');
+    const provClassB = (srcB || "").startsWith("Live") ? 'badge-provenance-live' : ((srcB || "").startsWith("Estimated (proxy):") ? 'badge-provenance-estimated' : 'badge-provenance-demo');
 
     const subA = (f.a_value != null && srcA) ? `<div class="preview-val-prov ${provClassA}">${escapeHtml(labelA)} &bull; ${escapeHtml(resA)}</div>` : "";
     const subB = (f.b_value != null && srcB) ? `<div class="preview-val-prov ${provClassB}">${escapeHtml(labelB)} &bull; ${escapeHtml(resB)}</div>` : "";
@@ -383,7 +383,7 @@ function updateHeaderDataBadge(data) {
     const srcA = f?.a_source || "";
     const srcB = f?.b_source || f?.source || "";
     const name = factorNames[k] || k;
-    if (srcA.startsWith("Live:") || srcB.startsWith("Live:")) {
+    if (srcA.startsWith("Live") || srcB.startsWith("Live")) {
       live.push(name);
     } else if (srcA.startsWith("Estimated (proxy):") || srcB.startsWith("Estimated (proxy):")) {
       estimated.push(name);

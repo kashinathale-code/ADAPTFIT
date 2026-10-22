@@ -146,8 +146,152 @@ OSM_OPEN_SPACE_RADIUS_M = 500
 # Radius for building search (metres)
 OSM_BUILDING_RADIUS_M = 200
 
+# Overpass mirrors tried sequentially in order
+OVERPASS_MIRRORS: List[str] = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+]
+
+DEFAULT_SNAPSHOTS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "datasets",
+    "live_snapshots.json",
+)
+
 DEMO_SOURCE = "Demo value"
 DEMO_RESOLUTION = "n/a (demo)"
+
+
+def _get_user_agent() -> str:
+    """Return descriptive User-Agent configured in Config.HTTP_USER_AGENT."""
+    try:
+        from flask import current_app
+        if current_app:
+            return current_app.config.get("HTTP_USER_AGENT", getattr(Config, "HTTP_USER_AGENT", "ADAPTFIT/1.0"))
+    except Exception:
+        pass
+    return getattr(
+        Config,
+        "HTTP_USER_AGENT",
+        "ADAPTFIT/1.0 (Climate Adaptation Transferability Tool; https://github.com/adaptfit; contact: research@adaptfit.org)",
+    )
+
+
+def _request_with_retry(
+    method: str,
+    url: str,
+    retries: int = 2,
+    connect_timeout: float = 5.0,
+    read_timeout: float = 10.0,
+    **kwargs,
+) -> requests.Response:
+    """
+    Execute HTTP request with descriptive User-Agent, connect timeout (5s by default),
+    and retry loop (2 retries).
+    """
+    headers = dict(kwargs.pop("headers", None) or {})
+    if "User-Agent" not in headers and "user-agent" not in headers:
+        headers["User-Agent"] = _get_user_agent()
+
+    raw_timeout = kwargs.pop("timeout", None)
+    if isinstance(raw_timeout, tuple):
+        timeout_val = raw_timeout
+    elif isinstance(raw_timeout, (int, float)):
+        timeout_val = (connect_timeout, float(raw_timeout))
+    else:
+        timeout_val = (connect_timeout, read_timeout)
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(retries + 1):
+        try:
+            if method.upper() == "POST":
+                resp = requests.post(url, headers=headers, timeout=timeout_val, **kwargs)
+            else:
+                resp = requests.get(url, headers=headers, timeout=timeout_val, **kwargs)
+
+            if resp.status_code >= 500 or resp.status_code == 429:
+                resp.raise_for_status()
+            return resp
+        except (requests.RequestException, Exception) as exc:
+            last_exc = exc
+            if attempt < retries:
+                if "PYTEST_CURRENT_TEST" not in os.environ:
+                    time.sleep(0.1 * (2 ** attempt))
+                continue
+            raise last_exc
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"Request to {url} failed without exception")
+
+
+def load_live_snapshots(snapshots_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load JSON file containing saved live snapshots for demo locations."""
+    path = DEFAULT_SNAPSHOTS_PATH if snapshots_path is None else snapshots_path
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def get_saved_snapshot(
+    factor: str,
+    lat: float,
+    lon: float,
+    name: Optional[str] = None,
+    snapshots_path: Optional[str] = None,
+    max_distance_km: float = 15.0,
+) -> Optional[Dict[str, Any]]:
+    """
+    Look up a saved snapshot for the given factor and location.
+    Matches by name (case-insensitive) or by proximity within max_distance_km.
+    Returns factor snapshot dict if found, else None.
+    """
+    data = load_live_snapshots(snapshots_path)
+    if not data or not isinstance(data, dict):
+        return None
+
+    locations = data.get("locations", {})
+    if not isinstance(locations, dict):
+        return None
+
+    matched_loc = None
+
+    # 1. Name match
+    if name:
+        clean_name = name.strip().lower()
+        for loc_key, loc in locations.items():
+            loc_name = loc.get("name", "").strip().lower()
+            if loc_name == clean_name or loc_key.lower() == clean_name or clean_name in loc_name or loc_name in clean_name:
+                matched_loc = loc
+                break
+
+    # 2. Coordinate proximity match if name match not found
+    if not matched_loc:
+        best_dist = float("inf")
+        best_loc = None
+        for loc in locations.values():
+            l_lat = loc.get("latitude")
+            l_lon = loc.get("longitude")
+            if l_lat is not None and l_lon is not None:
+                d = haversine_distance(lat, lon, float(l_lat), float(l_lon))
+                if d < best_dist:
+                    best_dist = d
+                    best_loc = loc
+        if best_loc and best_dist <= max_distance_km:
+            matched_loc = best_loc
+
+    if not matched_loc:
+        return None
+
+    factors = matched_loc.get("factors", {})
+    if factor in factors:
+        return factors[factor]
+    return None
 
 
 def get_cached_feature(
@@ -329,6 +473,7 @@ def fetch_open_meteo_slope(
     staleness_hours: int = 24,
     timeout: float = 10.0,
     name: Optional[str] = None,
+    snapshots_path: Optional[str] = None,
 ) -> Tuple[Optional[float], Optional[Dict[str, Any]], Optional[str]]:
     """
     Fetch elevation for target point and 4 neighbouring points ~100m away (north, south, east, west)
@@ -367,13 +512,13 @@ def fetch_open_meteo_slope(
     }
 
     try:
-        resp = requests.get(OPEN_METEO_ELEVATION_URL, params=params, timeout=timeout)
+        resp = _request_with_retry("GET", OPEN_METEO_ELEVATION_URL, params=params, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
         elevations = data.get("elevation")
 
         if not isinstance(elevations, list) or len(elevations) < 5 or any(e is None for e in elevations[:5]):
-            return None, None, "Live slope data from Open-Meteo was unavailable; fell back to demo/sample data."
+            raise ValueError("Incomplete elevation array")
 
         z_center = float(elevations[0])
         z_north = float(elevations[1])
@@ -422,6 +567,27 @@ def fetch_open_meteo_slope(
         return slope_pct, meta, None
 
     except (requests.RequestException, ValueError, KeyError):
+        snapshot = get_saved_snapshot("slope", lat, lon, name, snapshots_path)
+        if snapshot is not None:
+            snap_val = snapshot.get("value")
+            snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
+            snap_res = snapshot.get("resolution") or OPEN_METEO_ELEVATION_RESOLUTION
+            snap_trans = snapshot.get("transformation") or "Retrieved from cached live snapshot"
+            now_iso = datetime.now(timezone.utc).isoformat()
+            source_label = f"Live (cached snapshot, {snap_date})"
+            meta = {
+                "unit": "%",
+                "source": source_label,
+                "resolution": snap_res,
+                "data_date": snap_date,
+                "retrieved_at": now_iso,
+                "transformation": snap_trans,
+            }
+            return (
+                snap_val,
+                meta,
+                f"Live slope from Open-Meteo was unavailable; used saved snapshot from {snap_date}.",
+            )
         return None, None, "Live slope data from Open-Meteo was unavailable; fell back to demo/sample data."
 
 
@@ -432,6 +598,7 @@ def fetch_nasa_power_rainfall(
     staleness_hours: int = 24,
     timeout: float = 10.0,
     name: Optional[str] = None,
+    snapshots_path: Optional[str] = None,
 ) -> Tuple[Optional[float], Optional[Dict[str, Any]], Optional[str]]:
     """
     Fetch annual rainfall from NASA POWER climatology point API with SQLite caching.
@@ -466,14 +633,14 @@ def fetch_nasa_power_rainfall(
         "format": "JSON",
     }
     try:
-        resp = requests.get(NASA_POWER_POINT_URL, params=params, timeout=timeout)
+        resp = _request_with_retry("GET", NASA_POWER_POINT_URL, params=params, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
         param_dict = data.get("properties", {}).get("parameter", {}).get("PRECTOTCORR", {})
         ann_daily = param_dict.get("ANN")
 
         if ann_daily is None or ann_daily < 0:
-            return None, None, "Live rainfall data from NASA POWER was unavailable; fell back to demo/sample data."
+            raise ValueError("Missing or invalid PRECTOTCORR")
 
         # Convert daily mm/day to annual mm/year
         ann_yearly = round(ann_daily * 365.25, 1)
@@ -508,6 +675,27 @@ def fetch_nasa_power_rainfall(
         return ann_yearly, meta, None
 
     except (requests.RequestException, ValueError, KeyError):
+        snapshot = get_saved_snapshot("annual_rainfall", lat, lon, name, snapshots_path)
+        if snapshot is not None:
+            snap_val = snapshot.get("value")
+            snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
+            snap_res = snapshot.get("resolution") or NASA_POWER_RESOLUTION
+            snap_trans = snapshot.get("transformation") or "Retrieved from cached live snapshot"
+            now_iso = datetime.now(timezone.utc).isoformat()
+            source_label = f"Live (cached snapshot, {snap_date})"
+            meta = {
+                "unit": "mm/yr",
+                "source": source_label,
+                "resolution": snap_res,
+                "data_date": snap_date,
+                "retrieved_at": now_iso,
+                "transformation": snap_trans,
+            }
+            return (
+                snap_val,
+                meta,
+                f"Live rainfall from NASA POWER was unavailable; used saved snapshot from {snap_date}.",
+            )
         return None, None, "Live rainfall data from NASA POWER was unavailable; fell back to demo/sample data."
 
 
@@ -518,6 +706,7 @@ def fetch_soilgrids_infiltration(
     staleness_hours: int = 24,
     timeout: float = 10.0,
     name: Optional[str] = None,
+    snapshots_path: Optional[str] = None,
 ) -> Tuple[Optional[float], Optional[Dict[str, Any]], Optional[str]]:
     """
     Fetch USDA soil texture class from SoilGrids v2.0 REST API and estimate
@@ -562,7 +751,7 @@ def fetch_soilgrids_infiltration(
         "value": "mean",
     }
     try:
-        resp = requests.get(SOILGRIDS_PROPERTIES_URL, params=params, timeout=timeout)
+        resp = _request_with_retry("GET", SOILGRIDS_PROPERTIES_URL, params=params, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
 
@@ -577,12 +766,32 @@ def fetch_soilgrids_infiltration(
                     if isinstance(mean_val, str):
                         texture_class = mean_val
                     elif isinstance(mean_val, (int, float)):
-                        # Sometimes returned as integer code; try label first
                         label = depths[0].get("label")
                         texture_class = label if isinstance(label, str) else None
                 break
 
         if not texture_class:
+            snapshot = get_saved_snapshot("soil_infiltration", lat, lon, name, snapshots_path)
+            if snapshot is not None:
+                snap_val = snapshot.get("value")
+                snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
+                snap_res = snapshot.get("resolution") or SOILGRIDS_RESOLUTION
+                snap_trans = snapshot.get("transformation") or "Retrieved from cached live snapshot"
+                now_iso = datetime.now(timezone.utc).isoformat()
+                source_label = f"Live (cached snapshot, {snap_date})"
+                meta = {
+                    "unit": "mm/hr",
+                    "source": source_label,
+                    "resolution": snap_res,
+                    "data_date": snap_date,
+                    "retrieved_at": now_iso,
+                    "transformation": snap_trans,
+                }
+                return (
+                    snap_val,
+                    meta,
+                    f"Live soil data from SoilGrids returned no texture class; used saved snapshot from {snap_date}.",
+                )
             return (
                 None,
                 None,
@@ -592,6 +801,27 @@ def fetch_soilgrids_infiltration(
 
         ks = infiltration_from_texture(texture_class)
         if ks is None:
+            snapshot = get_saved_snapshot("soil_infiltration", lat, lon, name, snapshots_path)
+            if snapshot is not None:
+                snap_val = snapshot.get("value")
+                snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
+                snap_res = snapshot.get("resolution") or SOILGRIDS_RESOLUTION
+                snap_trans = snapshot.get("transformation") or "Retrieved from cached live snapshot"
+                now_iso = datetime.now(timezone.utc).isoformat()
+                source_label = f"Live (cached snapshot, {snap_date})"
+                meta = {
+                    "unit": "mm/hr",
+                    "source": source_label,
+                    "resolution": snap_res,
+                    "data_date": snap_date,
+                    "retrieved_at": now_iso,
+                    "transformation": snap_trans,
+                }
+                return (
+                    snap_val,
+                    meta,
+                    f"SoilGrids returned texture class '{texture_class}' not in Rawls table; used saved snapshot from {snap_date}.",
+                )
             return (
                 None,
                 None,
@@ -634,6 +864,27 @@ def fetch_soilgrids_infiltration(
         return ks, meta, None
 
     except (requests.RequestException, ValueError, KeyError):
+        snapshot = get_saved_snapshot("soil_infiltration", lat, lon, name, snapshots_path)
+        if snapshot is not None:
+            snap_val = snapshot.get("value")
+            snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
+            snap_res = snapshot.get("resolution") or SOILGRIDS_RESOLUTION
+            snap_trans = snapshot.get("transformation") or "Retrieved from cached live snapshot"
+            now_iso = datetime.now(timezone.utc).isoformat()
+            source_label = f"Live (cached snapshot, {snap_date})"
+            meta = {
+                "unit": "mm/hr",
+                "source": source_label,
+                "resolution": snap_res,
+                "data_date": snap_date,
+                "retrieved_at": now_iso,
+                "transformation": snap_trans,
+            }
+            return (
+                snap_val,
+                meta,
+                f"Live soil data from SoilGrids timed out; used saved snapshot from {snap_date}.",
+            )
         return (
             None,
             None,
@@ -649,10 +900,11 @@ def fetch_osm_open_space(
     timeout: float = 10.0,
     radius_m: int = OSM_OPEN_SPACE_RADIUS_M,
     name: Optional[str] = None,
+    snapshots_path: Optional[str] = None,
 ) -> Tuple[Optional[float], Optional[Dict[str, Any]], Optional[str]]:
     """
     Query OpenStreetMap Overpass API for parks / green spaces within `radius_m`
-    metres of the target point.
+    metres of the target point. Tries Overpass mirrors sequentially.
 
     Returns:
         (1.0 if any open space found, 0.0 if none, metadata_dict, error_warning)
@@ -689,68 +941,100 @@ def fetch_osm_open_space(
         f"out count;"
     )
 
-    try:
-        resp = requests.post(
-            OSM_OVERPASS_URL,
-            data={"data": overpass_query},
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    success = False
+    open_space_val = None
+    meta = None
 
-        total_count = data.get("elements", [])
-        # Overpass "out count" returns one element with "type": "count"
-        count_elements = [
-            e for e in total_count
-            if isinstance(e, dict) and e.get("type") == "count"
-        ]
-        if count_elements:
-            tags = count_elements[0].get("tags", {})
-            total = int(tags.get("total", 0))
-        else:
-            # Fallback: any non-count elements means features were found
-            total = len(total_count)
+    for mirror_url in OVERPASS_MIRRORS:
+        try:
+            resp = _request_with_retry(
+                "POST",
+                mirror_url,
+                data={"data": overpass_query},
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
-        open_space_val = 1.0 if total > 0 else 0.0
-        now_iso = datetime.now(timezone.utc).isoformat()
-        transformation = (
-            f"Overpass QL query: leisure/landuse parks and green areas "
-            f"within {radius_m}m radius; result = {'present' if open_space_val else 'absent'} "
-            f"({total} feature(s) found)"
-        )
+            total_count = data.get("elements", [])
+            count_elements = [
+                e for e in total_count
+                if isinstance(e, dict) and e.get("type") == "count"
+            ]
+            if count_elements:
+                tags = count_elements[0].get("tags", {})
+                total = int(tags.get("total", 0))
+            else:
+                total = len(total_count)
 
-        meta = {
-            "unit": "binary (1=present, 0=absent)",
-            "source": OSM_SOURCE,
-            "resolution": OSM_RESOLUTION,
-            "data_date": OSM_DATA_DATE,
-            "retrieved_at": now_iso,
-            "transformation": transformation,
-        }
+            open_space_val = 1.0 if total > 0 else 0.0
+            now_iso = datetime.now(timezone.utc).isoformat()
+            transformation = (
+                f"Overpass QL query: leisure/landuse parks and green areas "
+                f"within {radius_m}m radius; result = {'present' if open_space_val else 'absent'} "
+                f"({total} feature(s) found via {mirror_url})"
+            )
 
-        cache_feature(
-            factor="open_space",
-            lat=lat,
-            lon=lon,
-            value=open_space_val,
-            unit="binary (1=present, 0=absent)",
-            source=OSM_SOURCE,
-            resolution=OSM_RESOLUTION,
-            data_date=OSM_DATA_DATE,
-            retrieved_at=now_iso,
-            transformation=transformation,
-            db_path=target_db,
-            name=name,
-        )
+            meta = {
+                "unit": "binary (1=present, 0=absent)",
+                "source": OSM_SOURCE,
+                "resolution": OSM_RESOLUTION,
+                "data_date": OSM_DATA_DATE,
+                "retrieved_at": now_iso,
+                "transformation": transformation,
+            }
 
+            cache_feature(
+                factor="open_space",
+                lat=lat,
+                lon=lon,
+                value=open_space_val,
+                unit="binary (1=present, 0=absent)",
+                source=OSM_SOURCE,
+                resolution=OSM_RESOLUTION,
+                data_date=OSM_DATA_DATE,
+                retrieved_at=now_iso,
+                transformation=transformation,
+                db_path=target_db,
+                name=name,
+            )
+
+            success = True
+            break
+        except (requests.RequestException, ValueError, KeyError):
+            continue
+
+    if success and meta is not None:
         return open_space_val, meta, None
 
-    except (requests.RequestException, ValueError, KeyError):
+    # Fallback to saved snapshot
+    snapshot = get_saved_snapshot("open_space", lat, lon, name, snapshots_path)
+    if snapshot is not None:
+        snap_val = snapshot.get("value")
+        snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
+        snap_res = snapshot.get("resolution") or OSM_RESOLUTION
+        snap_trans = snapshot.get("transformation") or "Retrieved from cached live snapshot"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        source_label = f"Live (cached snapshot, {snap_date})"
+        meta = {
+            "unit": "binary (1=present, 0=absent)",
+            "source": source_label,
+            "resolution": snap_res,
+            "data_date": snap_date,
+            "retrieved_at": now_iso,
+            "transformation": snap_trans,
+        }
         return (
-            None,
-            None,
-            "Live open_space data from OpenStreetMap was unavailable; fell back to demo/sample data.",
+            snap_val,
+            meta,
+            f"Live open_space data from OpenStreetMap mirrors timed out; used saved snapshot from {snap_date}.",
         )
+
+    return (
+        None,
+        None,
+        "Live open_space data from OpenStreetMap was unavailable; fell back to demo/sample data.",
+    )
 
 
 def fetch_osm_building_distance(
@@ -761,10 +1045,12 @@ def fetch_osm_building_distance(
     timeout: float = 10.0,
     radius_m: int = OSM_BUILDING_RADIUS_M,
     name: Optional[str] = None,
+    snapshots_path: Optional[str] = None,
 ) -> Tuple[Optional[float], Optional[Dict[str, Any]], Optional[str]]:
     """
     Query OpenStreetMap Overpass API for buildings within `radius_m` metres and
-    return the distance to the nearest building centroid in metres.
+    return the distance to the nearest building centroid in metres. Tries Overpass
+    mirrors sequentially in order.
 
     Centroid approximation: the midpoint of the bounding box returned by
     Overpass for each way. Distance computed via haversine formula.
@@ -797,76 +1083,108 @@ def fetch_osm_building_distance(
         f"out bb;"
     )
 
-    try:
-        resp = requests.post(
-            OSM_OVERPASS_URL,
-            data={"data": overpass_query},
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    success = False
+    dist_m = None
+    meta = None
 
-        elements = data.get("elements", [])
-        buildings = [e for e in elements if isinstance(e, dict) and e.get("type") == "way"]
+    for mirror_url in OVERPASS_MIRRORS:
+        try:
+            resp = _request_with_retry(
+                "POST",
+                mirror_url,
+                data={"data": overpass_query},
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
-        if not buildings:
-            # No buildings found in radius → return radius_m as conservative estimate
-            dist_m = float(radius_m)
-            found_count = 0
-        else:
-            # Compute distance to nearest building centroid via bounding box midpoint
-            min_dist_m = float("inf")
-            for bldg in buildings:
-                bounds = bldg.get("bounds")
-                if not bounds:
-                    continue
-                c_lat = (bounds["minlat"] + bounds["maxlat"]) / 2.0
-                c_lon = (bounds["minlon"] + bounds["maxlon"]) / 2.0
-                d_km = haversine_distance(lat, lon, c_lat, c_lon)
-                d_m = d_km * 1000.0
-                if d_m < min_dist_m:
-                    min_dist_m = d_m
-            dist_m = round(min_dist_m, 1) if min_dist_m < float("inf") else float(radius_m)
-            found_count = len(buildings)
+            elements = data.get("elements", [])
+            buildings = [e for e in elements if isinstance(e, dict) and e.get("type") == "way"]
 
-        now_iso = datetime.now(timezone.utc).isoformat()
-        transformation = (
-            f"Nearest building centroid (bounding-box midpoint) from {found_count} "
-            f"OSM way[building] features within {radius_m}m; haversine distance = {dist_m}m"
-        )
+            if not buildings:
+                dist_m = float(radius_m)
+                found_count = 0
+            else:
+                min_dist_m = float("inf")
+                for bldg in buildings:
+                    bounds = bldg.get("bounds")
+                    if not bounds:
+                        continue
+                    c_lat = (bounds["minlat"] + bounds["maxlat"]) / 2.0
+                    c_lon = (bounds["minlon"] + bounds["maxlon"]) / 2.0
+                    d_km = haversine_distance(lat, lon, c_lat, c_lon)
+                    d_m = d_km * 1000.0
+                    if d_m < min_dist_m:
+                        min_dist_m = d_m
+                dist_m = round(min_dist_m, 1) if min_dist_m < float("inf") else float(radius_m)
+                found_count = len(buildings)
 
-        meta = {
-            "unit": "m",
-            "source": OSM_SOURCE,
-            "resolution": OSM_RESOLUTION,
-            "data_date": OSM_DATA_DATE,
-            "retrieved_at": now_iso,
-            "transformation": transformation,
-        }
+            now_iso = datetime.now(timezone.utc).isoformat()
+            transformation = (
+                f"Nearest building centroid (bounding-box midpoint) from {found_count} "
+                f"OSM way[building] features within {radius_m}m via {mirror_url}; haversine distance = {dist_m}m"
+            )
 
-        cache_feature(
-            factor="building_distance",
-            lat=lat,
-            lon=lon,
-            value=dist_m,
-            unit="m",
-            source=OSM_SOURCE,
-            resolution=OSM_RESOLUTION,
-            data_date=OSM_DATA_DATE,
-            retrieved_at=now_iso,
-            transformation=transformation,
-            db_path=target_db,
-            name=name,
-        )
+            meta = {
+                "unit": "m",
+                "source": OSM_SOURCE,
+                "resolution": OSM_RESOLUTION,
+                "data_date": OSM_DATA_DATE,
+                "retrieved_at": now_iso,
+                "transformation": transformation,
+            }
 
+            cache_feature(
+                factor="building_distance",
+                lat=lat,
+                lon=lon,
+                value=dist_m,
+                unit="m",
+                source=OSM_SOURCE,
+                resolution=OSM_RESOLUTION,
+                data_date=OSM_DATA_DATE,
+                retrieved_at=now_iso,
+                transformation=transformation,
+                db_path=target_db,
+                name=name,
+            )
+
+            success = True
+            break
+        except (requests.RequestException, ValueError, KeyError):
+            continue
+
+    if success and meta is not None:
         return dist_m, meta, None
 
-    except (requests.RequestException, ValueError, KeyError):
+    # Fallback to saved snapshot
+    snapshot = get_saved_snapshot("building_distance", lat, lon, name, snapshots_path)
+    if snapshot is not None:
+        snap_val = snapshot.get("value")
+        snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
+        snap_res = snapshot.get("resolution") or OSM_RESOLUTION
+        snap_trans = snapshot.get("transformation") or "Retrieved from cached live snapshot"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        source_label = f"Live (cached snapshot, {snap_date})"
+        meta = {
+            "unit": "m",
+            "source": source_label,
+            "resolution": snap_res,
+            "data_date": snap_date,
+            "retrieved_at": now_iso,
+            "transformation": snap_trans,
+        }
         return (
-            None,
-            None,
-            "Live building_distance data from OpenStreetMap was unavailable; fell back to demo/sample data.",
+            snap_val,
+            meta,
+            f"Live building_distance data from OpenStreetMap mirrors timed out; used saved snapshot from {snap_date}.",
         )
+
+    return (
+        None,
+        None,
+        "Live building_distance data from OpenStreetMap was unavailable; fell back to demo/sample data.",
+    )
 
 
 # OpenStreetMap Nominatim Geocoding configuration
@@ -931,14 +1249,15 @@ def geocode_place(
     results: List[Dict[str, Any]] = []
     try:
         _rate_limit_nominatim()
-        headers = {"User-Agent": NOMINATIM_USER_AGENT}
+        headers = {"User-Agent": _get_user_agent()}
         params = {
             "q": q_clean,
             "format": "json",
             "limit": 5,
             "addressdetails": 1,
         }
-        resp = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=timeout)
+        req_timeout = (5.0, float(timeout)) if isinstance(timeout, (int, float)) else timeout
+        resp = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=req_timeout)
         resp.raise_for_status()
         data = resp.json()
 
@@ -1062,13 +1381,16 @@ def fetch_location_environmental_data(
     use_live_osm: Optional[bool] = None,
     db_path: Optional[str] = None,
     staleness_hours: Optional[int] = None,
+    snapshots_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Fetch environmental values and metadata for a given coordinate or location name.
     
     If use_live_rainfall is True, annual_rainfall is fetched from NASA POWER.
     If use_live_slope is True, slope is fetched from Open-Meteo elevation.
-    All other factors stay from the CSV (or fall back to CSV on live failure/timeout).
+    If use_live_soil is True, soil_infiltration is fetched from SoilGrids (or cached snapshot).
+    If use_live_osm is True, open_space and building_distance are fetched from Overpass mirrors (or cached snapshot).
+    All other factors stay from the CSV (or fall back to snapshot, then CSV demo data).
     When all live flags are False, behaviour is exactly as default (CSV only).
     """
     if use_live_rainfall is None:
@@ -1207,17 +1529,24 @@ def fetch_location_environmental_data(
             staleness_hours=staleness_hours,
             timeout=10.0,
             name=name or (matched_record.get("name") if matched_record else None),
+            snapshots_path=snapshots_path,
         )
-        if live_val is not None and live_meta is not None:
+        if live_meta is not None:
             values["annual_rainfall"] = live_val
             metadata["annual_rainfall"] = live_meta
-            live_rainfall_used = True
+            if live_meta.get("source", "").startswith("Live (cached snapshot"):
+                live_rainfall_used = False
+            else:
+                live_rainfall_used = (live_val is not None)
+            if live_warn:
+                warnings.append(live_warn)
         else:
             # Fallback to CSV value (already in values["annual_rainfall"])
             if live_warn:
                 warnings.append(live_warn)
             if matched_record and values.get("annual_rainfall") is not None:
                 metadata["annual_rainfall"]["source"] = DEMO_SOURCE
+            live_rainfall_used = False
 
     # If live slope flag is enabled: fetch Open-Meteo elevation for slope
     live_slope_used = False
@@ -1229,17 +1558,24 @@ def fetch_location_environmental_data(
             staleness_hours=staleness_hours,
             timeout=10.0,
             name=name or (matched_record.get("name") if matched_record else None),
+            snapshots_path=snapshots_path,
         )
-        if live_slope_val is not None and live_slope_meta is not None:
+        if live_slope_meta is not None:
             values["slope"] = live_slope_val
             metadata["slope"] = live_slope_meta
-            live_slope_used = True
+            if live_slope_meta.get("source", "").startswith("Live (cached snapshot"):
+                live_slope_used = False
+            else:
+                live_slope_used = (live_slope_val is not None)
+            if live_slope_warn:
+                warnings.append(live_slope_warn)
         else:
             # Fallback to CSV value (already in values["slope"])
             if live_slope_warn:
                 warnings.append(live_slope_warn)
             if matched_record and values.get("slope") is not None:
                 metadata["slope"]["source"] = DEMO_SOURCE
+            live_slope_used = False
 
     # If live soil flag is enabled: fetch SoilGrids texture → infiltration estimate
     live_soil_used = False
@@ -1251,22 +1587,32 @@ def fetch_location_environmental_data(
             staleness_hours=staleness_hours,
             timeout=10.0,
             name=name or (matched_record.get("name") if matched_record else None),
+            snapshots_path=snapshots_path,
         )
-        if live_soil_val is not None and live_soil_meta is not None:
+        if live_soil_meta is not None:
             values["soil_infiltration"] = live_soil_val
             metadata["soil_infiltration"] = live_soil_meta
-            live_soil_used = True
+            if live_soil_meta.get("source", "").startswith("Live (cached snapshot"):
+                live_soil_used = False
+            else:
+                live_soil_used = (live_soil_val is not None)
+            if live_soil_warn:
+                warnings.append(live_soil_warn)
         else:
             # Fallback to CSV value (already in values["soil_infiltration"])
             if live_soil_warn:
                 warnings.append(live_soil_warn)
             if matched_record and values.get("soil_infiltration") is not None:
                 metadata["soil_infiltration"]["source"] = DEMO_SOURCE
+            live_soil_used = False
 
     # If live OSM flag is enabled: fetch open_space and building_distance from Overpass
     live_osm_used = False
     if use_live_osm:
         loc_name_hint = name or (matched_record.get("name") if matched_record else None)
+
+        live_osm_os = False
+        live_osm_bd = False
 
         # open_space
         osm_os_val, osm_os_meta, osm_os_warn = fetch_osm_open_space(
@@ -1276,11 +1622,15 @@ def fetch_location_environmental_data(
             staleness_hours=staleness_hours,
             timeout=10.0,
             name=loc_name_hint,
+            snapshots_path=snapshots_path,
         )
-        if osm_os_val is not None and osm_os_meta is not None:
+        if osm_os_meta is not None:
             values["open_space"] = osm_os_val
             metadata["open_space"] = osm_os_meta
-            live_osm_used = True
+            if not osm_os_meta.get("source", "").startswith("Live (cached snapshot"):
+                live_osm_os = True
+            if osm_os_warn:
+                warnings.append(osm_os_warn)
         else:
             if osm_os_warn:
                 warnings.append(osm_os_warn)
@@ -1295,16 +1645,22 @@ def fetch_location_environmental_data(
             staleness_hours=staleness_hours,
             timeout=10.0,
             name=loc_name_hint,
+            snapshots_path=snapshots_path,
         )
-        if osm_bd_val is not None and osm_bd_meta is not None:
+        if osm_bd_meta is not None:
             values["building_distance"] = osm_bd_val
             metadata["building_distance"] = osm_bd_meta
-            live_osm_used = True
+            if not osm_bd_meta.get("source", "").startswith("Live (cached snapshot"):
+                live_osm_bd = True
+            if osm_bd_warn:
+                warnings.append(osm_bd_warn)
         else:
             if osm_bd_warn:
                 warnings.append(osm_bd_warn)
             if matched_record and values.get("building_distance") is not None:
                 metadata["building_distance"]["source"] = DEMO_SOURCE
+
+        live_osm_used = bool(live_osm_os and live_osm_bd)
 
     return {
         "name": name or (matched_record.get("name") if matched_record else None),

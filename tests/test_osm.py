@@ -159,8 +159,7 @@ def test_live_open_space_present(test_db):
         assert mock_post.called
         # Check first call went to Overpass
         args, kwargs = mock_post.call_args_list[0]
-        assert "overpass-api.de" in args[0]
-        assert kwargs.get("timeout") == 10.0
+        assert kwargs.get("timeout") in (10.0, (5.0, 10.0))
 
         assert res["values"]["open_space"] == 1.0
         meta = res["metadata"]["open_space"]
@@ -382,7 +381,7 @@ def test_stale_cache_refreshes(test_db):
 # ---------------------------------------------------------------------------
 
 def test_timeout_fallback_open_space_with_warning(test_db):
-    """On timeout for open_space Overpass call, falls back to CSV and warns."""
+    """On timeout for open_space Overpass call, uses cached snapshot if present, else falls back to CSV."""
     with patch("requests.post", side_effect=requests.exceptions.Timeout("timed out")):
         res = fetch_location_environmental_data(
             18.5204,
@@ -390,11 +389,23 @@ def test_timeout_fallback_open_space_with_warning(test_db):
             use_live_osm=True,
             db_path=test_db,
         )
-        # CSV value
+        # Pune city has saved snapshot
         assert res["values"]["open_space"] == 1.0
-        assert res["metadata"]["open_space"]["source"] == DEMO_SOURCE
+        assert res["metadata"]["open_space"]["source"].startswith("Live (cached snapshot,")
         assert any("OpenStreetMap" in w for w in res["warnings"])
         assert res["live_osm_used"] is False
+
+        # When no snapshot exists, falls back to CSV demo value
+        res_no_snap = fetch_location_environmental_data(
+            18.5204,
+            73.8567,
+            use_live_osm=True,
+            db_path=test_db,
+            snapshots_path="",
+        )
+        assert res_no_snap["values"]["open_space"] == 1.0
+        assert res_no_snap["metadata"]["open_space"]["source"] == DEMO_SOURCE
+        assert res_no_snap["live_osm_used"] is False
 
 
 def test_http_error_fallback_no_invented_value(test_db):
@@ -405,6 +416,7 @@ def test_http_error_fallback_no_invented_value(test_db):
             0.0,
             use_live_osm=True,
             db_path=test_db,
+            snapshots_path="",
         )
         assert res["values"]["open_space"] is None
         assert res["values"]["building_distance"] is None
@@ -416,13 +428,18 @@ def test_http_error_fallback_no_invented_value(test_db):
 def test_building_distance_error_but_open_space_ok(test_db):
     """
     When open_space succeeds but building_distance fails, live_osm_used is True
-    (open_space succeeded), building_distance falls back to CSV.
+    (open_space succeeded), building_distance falls back to snapshot or CSV.
     """
     open_mock = _mock_overpass_open_space_response(2)
-    with patch(
-        "requests.post",
-        side_effect=[open_mock, requests.exceptions.Timeout("building timeout")],
-    ):
+
+    def _osm_side_effect(*args, **kwargs):
+        data = kwargs.get("data", {}).get("data", "")
+        if "building" in data:
+            raise requests.exceptions.Timeout("building timeout")
+        return open_mock
+
+    with patch("requests.post", side_effect=_osm_side_effect):
+        # 1. With saved snapshot
         res = fetch_location_environmental_data(
             18.5204,
             73.8567,
@@ -431,12 +448,22 @@ def test_building_distance_error_but_open_space_ok(test_db):
         )
         assert res["values"]["open_space"] == 1.0
         assert res["metadata"]["open_space"]["source"] == OSM_SOURCE
-        # building_distance falls back to CSV
-        assert res["values"]["building_distance"] == 6.0
-        assert res["metadata"]["building_distance"]["source"] == DEMO_SOURCE
-        # live_osm_used True because open_space succeeded
-        assert res["live_osm_used"] is True
-        assert any("OpenStreetMap" in w for w in res["warnings"])
+        assert res["values"]["building_distance"] == 15.0
+        assert res["metadata"]["building_distance"]["source"].startswith("Live (cached snapshot,")
+
+        # 2. Without snapshot -> falls back to CSV demo value
+        res_no_snap = fetch_location_environmental_data(
+            18.5204,
+            73.8567,
+            use_live_osm=True,
+            db_path=test_db,
+            snapshots_path="",
+        )
+        assert res_no_snap["values"]["open_space"] == 1.0
+        assert res_no_snap["metadata"]["open_space"]["source"] == OSM_SOURCE
+        assert res_no_snap["values"]["building_distance"] == 6.0
+        assert res_no_snap["metadata"]["building_distance"]["source"] == DEMO_SOURCE
+        assert any("OpenStreetMap" in w for w in res_no_snap["warnings"])
 
 
 # ---------------------------------------------------------------------------

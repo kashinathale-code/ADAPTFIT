@@ -55,6 +55,17 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
     # Register blueprints
     app.register_blueprint(api_bp)
 
+    from backend.routes import get_configured_badge_info
+
+    @app.context_processor
+    def inject_header_badge():
+        badge_info = get_configured_badge_info(app.config)
+        return {
+            "header_badge_text": badge_info["text"],
+            "header_badge_class": badge_info["badge_class"],
+            "header_badge_is_live": badge_info["is_live"],
+        }
+
     def get_seed_adaptation_data():
         try:
             p = app.config.get("DATABASE_PATH", Config.DATABASE_PATH)

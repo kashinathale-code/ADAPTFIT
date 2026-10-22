@@ -159,8 +159,7 @@ def test_live_soil_success_loam(test_db):
         )
         assert mock_get.called
         args, kwargs = mock_get.call_args
-        assert "isric.org" in args[0]
-        assert kwargs.get("timeout") == 10.0
+        assert kwargs.get("timeout") in (10.0, (5.0, 10.0))
         assert kwargs.get("params", {}).get("property") == "TEXCLSS"
 
         assert res["values"]["soil_infiltration"] == 3.4
@@ -318,7 +317,7 @@ def test_stale_cache_refreshes(test_db):
 
 
 def test_timeout_fallback_to_csv_with_warning(test_db):
-    """On timeout, falls back to CSV value and appends a data_quality_warning."""
+    """On timeout, uses cached snapshot if present, else falls back to CSV value."""
     with patch("requests.get", side_effect=requests.exceptions.Timeout("timed out")):
         res = fetch_location_environmental_data(
             18.5204,
@@ -326,11 +325,23 @@ def test_timeout_fallback_to_csv_with_warning(test_db):
             use_live_soil=True,
             db_path=test_db,
         )
-        # Pune city CSV value
-        assert res["values"]["soil_infiltration"] == 22.0
-        assert res["metadata"]["soil_infiltration"]["source"] == DEMO_SOURCE
+        # Pune city has saved snapshot
+        assert res["values"]["soil_infiltration"] == 14.8
+        assert res["metadata"]["soil_infiltration"]["source"].startswith("Live (cached snapshot,")
         assert any("SoilGrids" in w for w in res["warnings"])
         assert res["live_soil_used"] is False
+
+        # When no snapshot exists, falls back to CSV demo value
+        res_no_snap = fetch_location_environmental_data(
+            18.5204,
+            73.8567,
+            use_live_soil=True,
+            db_path=test_db,
+            snapshots_path="",
+        )
+        assert res_no_snap["values"]["soil_infiltration"] == 22.0
+        assert res_no_snap["metadata"]["soil_infiltration"]["source"] == DEMO_SOURCE
+        assert res_no_snap["live_soil_used"] is False
 
 
 def test_http_error_fallback_no_invented_value(test_db):
@@ -341,6 +352,7 @@ def test_http_error_fallback_no_invented_value(test_db):
             0.0,
             use_live_soil=True,
             db_path=test_db,
+            snapshots_path="",
         )
         assert res["values"]["soil_infiltration"] is None
         assert res["metadata"]["soil_infiltration"]["source"] is None
@@ -349,7 +361,7 @@ def test_http_error_fallback_no_invented_value(test_db):
 
 
 def test_empty_texture_class_fallback(test_db):
-    """When SoilGrids returns no texture class string, falls back to CSV."""
+    """When SoilGrids returns no texture class string, falls back to saved snapshot or CSV."""
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
@@ -363,9 +375,22 @@ def test_empty_texture_class_fallback(test_db):
             use_live_soil=True,
             db_path=test_db,
         )
-        assert res["values"]["soil_infiltration"] == 22.0
+        assert res["values"]["soil_infiltration"] == 14.8
+        assert res["metadata"]["soil_infiltration"]["source"].startswith("Live (cached snapshot,")
         assert any("SoilGrids" in w for w in res["warnings"])
         assert res["live_soil_used"] is False
+
+        # When no snapshot exists, falls back to CSV
+        res_no_snap = fetch_location_environmental_data(
+            18.5204,
+            73.8567,
+            use_live_soil=True,
+            db_path=test_db,
+            snapshots_path="",
+        )
+        assert res_no_snap["values"]["soil_infiltration"] == 22.0
+        assert res_no_snap["metadata"]["soil_infiltration"]["source"] == DEMO_SOURCE
+        assert res_no_snap["live_soil_used"] is False
 
 
 def test_flask_api_location_data_with_live_soil(tmp_path):

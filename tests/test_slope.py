@@ -79,7 +79,7 @@ def test_live_slope_success_and_calculation(test_db):
         assert mock_get.called
         args, kwargs = mock_get.call_args
         assert "api.open-meteo.com/v1/elevation" in args[0]
-        assert kwargs.get("timeout") == 10.0
+        assert kwargs.get("timeout") in (10.0, (5.0, 10.0))
         params = kwargs.get("params", {})
         assert "latitude" in params
         assert "longitude" in params

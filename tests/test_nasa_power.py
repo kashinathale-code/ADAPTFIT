@@ -87,7 +87,7 @@ def test_live_rainfall_success_and_unit_conversion(test_db):
         # Check call arguments
         args, kwargs = mock_get.call_args
         assert "power.larc.nasa.gov" in args[0]
-        assert kwargs.get("timeout") == 10.0
+        assert kwargs.get("timeout") in (10.0, (5.0, 10.0))
         assert kwargs.get("params", {}).get("parameters") == "PRECTOTCORR"
 
         # Converted: 2.5 mm/day * 365.25 = 913.1 mm/yr
