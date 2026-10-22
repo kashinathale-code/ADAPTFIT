@@ -521,6 +521,86 @@ def create_assessment():
 
 
 # --------------------------------------------------------------------------- #
+# GET /api/assessments                                                       #
+# --------------------------------------------------------------------------- #
+
+@api_bp.route("/assessments", methods=["GET"])
+def list_assessments():
+    """List historical assessments, newest first, with pagination."""
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (ValueError, TypeError):
+        page = 1
+
+    try:
+        per_page = max(1, min(100, int(request.args.get("per_page", request.args.get("limit", 10)))))
+    except (ValueError, TypeError):
+        per_page = 10
+
+    offset = (page - 1) * per_page
+
+    conn = _get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT COUNT(*) FROM assessments")
+    total = cur.fetchone()[0]
+
+    cur.execute(
+        """
+        SELECT a.id, a.adaptation_id, ad.name AS adaptation_name, a.status, a.score, a.created_at,
+               loc_a.id AS a_id, loc_a.name AS a_name, loc_a.latitude AS a_lat, loc_a.longitude AS a_lon,
+               loc_b.id AS b_id, loc_b.name AS b_name, loc_b.latitude AS b_lat, loc_b.longitude AS b_lon
+        FROM assessments a
+        JOIN adaptations ad ON a.adaptation_id = ad.id
+        JOIN locations loc_a ON a.location_a_id = loc_a.id
+        JOIN locations loc_b ON a.location_b_id = loc_b.id
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (per_page, offset),
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    items = [
+        {
+            "id": r["id"],
+            "assessment_id": r["id"],
+            "adaptation_id": r["adaptation_id"],
+            "adaptation_name": r["adaptation_name"],
+            "status": r["status"],
+            "score": round(r["score"], 2) if r["score"] is not None else None,
+            "reference_location": {
+                "id": r["a_id"],
+                "name": r["a_name"],
+                "latitude": float(r["a_lat"]) if r["a_lat"] is not None else None,
+                "longitude": float(r["a_lon"]) if r["a_lon"] is not None else None,
+            },
+            "target_location": {
+                "id": r["b_id"],
+                "name": r["b_name"],
+                "latitude": float(r["b_lat"]) if r["b_lat"] is not None else None,
+                "longitude": float(r["b_lon"]) if r["b_lon"] is not None else None,
+            },
+            "location_a": r["a_name"],
+            "location_b": r["b_name"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+    total_pages = max(1, (total + per_page - 1) // per_page) if total > 0 else 1
+
+    return jsonify({
+        "assessments": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": total_pages,
+    }), 200
+
+
+# --------------------------------------------------------------------------- #
 # GET /api/assessments/<id>                                                  #
 # --------------------------------------------------------------------------- #
 

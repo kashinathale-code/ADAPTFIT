@@ -39,6 +39,7 @@
         <a href="{{ url_for('index') }}" class="nav-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
         <a href="{{ url_for('new_assessment_page') }}" class="nav-link {% if request.path == '/new' %}active{% endif %}">New Assessment</a>
         <a href="{{ url_for('results_page') }}" class="nav-link {% if request.path.startswith('/results') %}active{% endif %}">Results</a>
+        <a href="{{ url_for('history_page') }}" class="nav-link {% if request.path.startswith('/history') %}active{% endif %}">History</a>
       </nav>
 
       <div class="demo-badge-header" id="headerDataBadge">

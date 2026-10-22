@@ -398,4 +398,55 @@ def test_assessment_evidence_and_rule_version(client):
         assert factor["rule_version"] != ""
 
 
+def test_list_assessments_endpoint(client):
+    # Create 3 assessments
+    for i in range(3):
+        payload = {
+            "adaptation_id": "rain_garden",
+            "reference_location": {"name": f"City A-{i}", "latitude": 18.52, "longitude": 73.85},
+            "target_location": {"name": f"City B-{i}", "latitude": 18.63, "longitude": 73.80},
+        }
+        res = client.post("/api/assessments", json=payload)
+        assert res.status_code == 201
+
+    # Call GET /api/assessments
+    res_list = client.get("/api/assessments?page=1&limit=2")
+    assert res_list.status_code == 200
+    data = res_list.get_json()
+    assert "assessments" in data
+    assert "total" in data
+    assert "pages" in data
+    assert data["total"] >= 3
+    assert len(data["assessments"]) == 2
+    assert data["page"] == 1
+    assert data["per_page"] == 2
+
+    # Check newest first ordering
+    first = data["assessments"][0]
+    second = data["assessments"][1]
+    assert first["id"] > second["id"]
+    assert "status" in first
+    assert "score" in first
+    assert "location_a" in first
+    assert "location_b" in first
+
+
+def test_frontend_history_page(client):
+    # Verify /history route
+    res = client.get("/history")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "Assessment History" in html
+    assert "historyTable" in html
+    assert "PRD §13" in html
+
+    # Verify dashboard button in index links to /history
+    res_index = client.get("/")
+    assert res_index.status_code == 200
+    index_html = res_index.get_data(as_text=True)
+    assert 'href="/history"' in index_html
+    assert "View recent results" in index_html
+
+
+
 

@@ -116,6 +116,11 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         """Assessment Results page."""
         return render_template("results.html", assessment_id=assessment_id)
 
+    @app.route("/history")
+    def history_page():
+        """Assessment History page."""
+        return render_template("history.html")
+
     return app
 
 

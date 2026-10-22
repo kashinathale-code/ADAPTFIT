@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+
+{% block title %}Assessment History – ADAPTFIT{% endblock %}
+
+{% block content %}
+<div class="history-page-container">
+
+  <!-- Header Section -->
+  <header class="page-header history-header">
+    <div class="header-content">
+      <div class="header-badge-row">
+        <span class="badge badge-primary">Audit Log</span>
+        <span class="text-muted font-mono" id="totalRecordsLabel">Loading history...</span>
+      </div>
+      <h1 class="page-title">Assessment History</h1>
+      <p class="page-subtitle">
+        Browse, filter, and review previously computed climate adaptation transferability reports.
+      </p>
+    </div>
+    <div class="header-actions">
+      <a href="{{ url_for('new_assessment_page') }}" class="btn btn-primary">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        New Assessment
+      </a>
+    </div>
+  </header>
+
+  <!-- Table Card -->
+  <div class="history-card">
+    <div class="history-toolbar">
+      <div class="toolbar-left">
+        <label for="historyStatusFilter" class="toolbar-label">Status:</label>
+        <select id="historyStatusFilter" class="form-control-sm" onchange="applyFilters()">
+          <option value="all">All Statuses</option>
+          <option value="suitable">Suitable</option>
+          <option value="conditional">Conditional</option>
+          <option value="unsuitable">Unsuitable</option>
+          <option value="insufficient_data">Insufficient Data</option>
+        </select>
+      </div>
+      <div class="toolbar-right">
+        <span id="pageInfo" class="page-counter">Page 1</span>
+        <div class="pagination-buttons">
+          <button type="button" id="prevPageBtn" class="btn btn-sm btn-secondary" onclick="changePage(-1)" disabled>
+            &larr; Prev
+          </button>
+          <button type="button" id="nextPageBtn" class="btn btn-sm btn-secondary" onclick="changePage(1)" disabled>
+            Next &rarr;
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table Responsive -->
+    <div class="table-responsive">
+      <table class="history-table" id="historyTable">
+        <thead>
+          <tr>
+            <th style="width: 70px;">ID</th>
+            <th>Date &amp; Time</th>
+            <th>Adaptation</th>
+            <th>Reference Site (A)</th>
+            <th>Target Site (B)</th>
+            <th class="col-center">Status</th>
+            <th class="col-center">Score</th>
+            <th class="col-center" style="width: 130px;">Action</th>
+          </tr>
+        </thead>
+        <tbody id="historyTableBody">
+          <tr>
+            <td colspan="8" class="text-center py-8 text-muted">
+              <div class="loading-spinner-small"></div> Loading assessment records...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Empty State Container -->
+    <div id="historyEmptyState" class="empty-state-card" style="display: none; padding: 40px 20px;">
+      <div class="empty-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </div>
+      <h3>No Assessment Records Found</h3>
+      <p class="text-muted">No assessments have been run yet or match your active filter.</p>
+      <a href="{{ url_for('new_assessment_page') }}" class="btn btn-primary" style="margin-top: 14px;">
+        Run First Assessment
+      </a>
+    </div>
+
+  </div>
+
+  <!-- Statutory PRD §13 Disclaimer Box -->
+  <div class="disclaimer-callout mt-8">
+    <div class="disclaimer-callout-icon">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+        <line x1="12" y1="9" x2="12" y2="13"></line>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </svg>
+    </div>
+    <div class="disclaimer-callout-body">
+      <h4 class="disclaimer-callout-title">Statutory Disclaimer (PRD §13)</h4>
+      <p class="disclaimer-callout-text">
+        &ldquo;ADAPTFIT is a preliminary, explainable decision-support prototype. It compares documented adaptation requirements with available environmental data for reference and target locations. Results depend on data coverage, spatial resolution and the quality of the requirements; they are not a guarantee of implementation success.&rdquo;
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<style>
+.history-page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 20px 60px;
+}
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  gap: 20px;
+}
+.header-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.history-card {
+  background: #ffffff;
+  border: 1px solid var(--border-medium, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+.history-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border-medium, #e2e8f0);
+}
+.toolbar-left, .toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.toolbar-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+}
+.page-counter {
+  font-size: 0.85rem;
+  color: #64748b;
+  font-weight: 500;
+}
+.pagination-buttons {
+  display: flex;
+  gap: 6px;
+}
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.history-table th {
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 600;
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid #cbd5e1;
+}
+.history-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #1e293b;
+}
+.history-table tr:hover {
+  background: #f8fafc;
+}
+.status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.status-badge.suitable {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+.status-badge.conditional {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.status-badge.unsuitable {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+.status-badge.insufficient_data {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+.score-pill {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.mt-8 { margin-top: 32px; }
+.py-8 { padding-top: 32px; padding-bottom: 32px; }
+</style>
+
+<script>
+let currentPage = 1;
+const perPage = 10;
+let totalPages = 1;
+let allItems = [];
+
+async function loadHistory(page = 1) {
+  currentPage = page;
+  const tbody = document.getElementById("historyTableBody");
+  const emptyState = document.getElementById("historyEmptyState");
+  tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-muted">Loading assessments...</td></tr>`;
+
+  try {
+    const res = await fetch(`/api/assessments?page=${page}&limit=${perPage}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    allItems = data.assessments || [];
+    totalPages = data.pages || 1;
+
+    document.getElementById("totalRecordsLabel").textContent = `${data.total || 0} total records`;
+    document.getElementById("pageInfo").textContent = `Page ${data.page || 1} of ${totalPages}`;
+    document.getElementById("prevPageBtn").disabled = currentPage <= 1;
+    document.getElementById("nextPageBtn").disabled = currentPage >= totalPages;
+
+    applyFilters();
+  } catch (err) {
+    console.error("Failed to load assessments:", err);
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-danger">Failed to load assessment history: ${err.message}</td></tr>`;
+  }
+}
+
+function applyFilters() {
+  const filter = document.getElementById("historyStatusFilter").value;
+  const filtered = filter === "all" ? allItems : allItems.filter(item => item.status === filter);
+  renderTable(filtered);
+}
+
+function renderTable(items) {
+  const tbody = document.getElementById("historyTableBody");
+  const emptyState = document.getElementById("historyEmptyState");
+  const table = document.getElementById("historyTable");
+
+  if (!items || items.length === 0) {
+    tbody.innerHTML = "";
+    table.style.display = "none";
+    emptyState.style.display = "block";
+    return;
+  }
+
+  table.style.display = "table";
+  emptyState.style.display = "none";
+
+  tbody.innerHTML = items.map(item => {
+    const dateStr = item.created_at ? new Date(item.created_at).toLocaleString() : "Unknown";
+    const statusClass = item.status || "insufficient_data";
+    const statusLabel = (item.status || "insufficient data").replace("_", " ").toUpperCase();
+    const scoreDisplay = item.score != null ? `${Math.round(item.score * 100)}%` : '<span class="text-muted">n/a</span>';
+    const locA = item.location_a || item.reference_location?.name || "Ref Site";
+    const locB = item.location_b || item.target_location?.name || "Target Site";
+    const adaptName = item.adaptation_name || "Rain Garden";
+
+    return `
+      <tr>
+        <td><strong>#${item.id}</strong></td>
+        <td class="text-muted" style="font-size: 0.85rem;">${escapeHtml(dateStr)}</td>
+        <td><strong>${escapeHtml(adaptName)}</strong></td>
+        <td>${escapeHtml(locA)}</td>
+        <td>${escapeHtml(locB)}</td>
+        <td class="col-center">
+          <span class="status-badge ${statusClass}">${statusLabel}</span>
+        </td>
+        <td class="col-center">
+          <span class="score-pill">${scoreDisplay}</span>
+        </td>
+        <td class="col-center">
+          <a href="/results?id=${item.id}" class="btn btn-xs btn-primary">
+            View Report
+          </a>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function changePage(delta) {
+  const target = currentPage + delta;
+  if (target >= 1 && target <= totalPages) {
+    loadHistory(target);
+  }
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  loadHistory(1);
+});
+</script>
+{% endblock %}
