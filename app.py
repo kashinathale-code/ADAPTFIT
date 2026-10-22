@@ -121,6 +121,20 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         """Assessment History page."""
         return render_template("history.html")
 
+    @app.route("/compare")
+    def compare_page():
+        """Compare multiple target locations against reference site (FR-11)."""
+        adapt, thresholds = get_seed_adaptation_data()
+        max_missing_pct = int(round(float(app.config.get("MAX_MISSING_WEIGHT", Config.MAX_MISSING_WEIGHT)) * 100))
+        suitable_min = float(app.config.get("SUITABLE_MIN", Config.SUITABLE_MIN))
+        return render_template(
+            "compare.html",
+            adaptation=adapt,
+            thresholds=thresholds,
+            max_missing_pct=max_missing_pct,
+            suitable_min=suitable_min,
+        )
+
     return app
 
 

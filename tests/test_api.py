@@ -560,6 +560,166 @@ def test_geocode_ui_elements_in_assessment_page(client):
     assert "searchPlace('B')" in html
 
 
+# --------------------------------------------------------------------------- #
+# Multi-Target Comparison Tests (FR-11)                                       #
+# --------------------------------------------------------------------------- #
+
+def test_post_comparisons_validation(client):
+    # Missing / empty payload
+    r = client.post("/api/comparisons", json="not a dict")
+    assert r.status_code == 400
+
+    # Missing adaptation_id
+    r = client.post(
+        "/api/comparisons",
+        json={
+            "reference_location": {"latitude": 18.5204, "longitude": 73.8567},
+            "targets": [{"latitude": 18.6298, "longitude": 73.7997}],
+        },
+    )
+    assert r.status_code == 400
+    assert "adaptation_id" in r.get_json()["error"]
+
+    # Unknown adaptation_id
+    r = client.post(
+        "/api/comparisons",
+        json={
+            "adaptation_id": "non_existent_adaptation",
+            "reference_location": {"latitude": 18.5204, "longitude": 73.8567},
+            "targets": [{"latitude": 18.6298, "longitude": 73.7997}],
+        },
+    )
+    assert r.status_code == 404
+
+    # Missing reference_location
+    r = client.post(
+        "/api/comparisons",
+        json={
+            "adaptation_id": "rain_garden",
+            "targets": [{"latitude": 18.6298, "longitude": 73.7997}],
+        },
+    )
+    assert r.status_code == 400
+
+    # Empty targets list
+    r = client.post(
+        "/api/comparisons",
+        json={
+            "adaptation_id": "rain_garden",
+            "reference_location": {"latitude": 18.5204, "longitude": 73.8567},
+            "targets": [],
+        },
+    )
+    assert r.status_code == 400
+    assert "at least 1 target" in r.get_json()["error"]
+
+    # Exceeding 5 targets
+    r = client.post(
+        "/api/comparisons",
+        json={
+            "adaptation_id": "rain_garden",
+            "reference_location": {"latitude": 18.5204, "longitude": 73.8567},
+            "targets": [{"latitude": 18.0 + i, "longitude": 73.0} for i in range(6)],
+        },
+    )
+    assert r.status_code == 400
+    assert "cannot exceed 5" in r.get_json()["error"]
+
+    # Invalid target coordinate
+    r = client.post(
+        "/api/comparisons",
+        json={
+            "adaptation_id": "rain_garden",
+            "reference_location": {"latitude": 18.5204, "longitude": 73.8567},
+            "targets": [
+                {"name": "Valid Target", "latitude": 18.6298, "longitude": 73.7997},
+                {"name": "Bad Target", "latitude": 999.0, "longitude": 73.7997},
+            ],
+        },
+    )
+    assert r.status_code == 400
+    assert "Target #2" in r.get_json()["error"]
+
+
+def test_post_comparisons_successful_ranking(client):
+    """
+    Test comparing Pune against Pimpri, Niphad, Lonavala, and Nashik using sample CSV.
+    Expected statuses in sample CSV:
+      - Pimpri: suitable (score 1.0)
+      - Nashik: conditional (open space = 0)
+      - Lonavala: insufficient_data (soil_infiltration is NULL)
+      - Niphad: unsuitable (slope = 12% > 8%)
+    Ranking order must be: suitable (#1) -> conditional (#2) -> insufficient_data (#3) -> unsuitable (#4).
+    """
+    payload = {
+        "adaptation_id": "rain_garden",
+        "reference_location": {
+            "name": "Pune Reference",
+            "latitude": 18.5204,
+            "longitude": 73.8567,
+        },
+        "targets": [
+            {"name": "Niphad Site", "latitude": 20.0798, "longitude": 74.1069},
+            {"name": "Pimpri Site", "latitude": 18.6298, "longitude": 73.7997},
+            {"name": "Lonavala Site", "latitude": 18.7546, "longitude": 73.4062},
+            {"name": "Nashik Site", "latitude": 19.9975, "longitude": 73.7898},
+        ],
+    }
+
+    res = client.post("/api/comparisons", json=payload)
+    assert res.status_code == 200
+    data = res.get_json()
+
+    assert data["adaptation_id"] == "rain_garden"
+    assert data["reference_location"]["name"] == "Pune Reference"
+    assert data["total_targets"] == 4
+    targets = data["targets"]
+    assert len(targets) == 4
+
+    # Verify rank numbers are sequential 1..4
+    assert [t["rank"] for t in targets] == [1, 2, 3, 4]
+
+    # Verify rank ordering: Suitable -> Conditional -> Insufficient Data -> Unsuitable
+    ranked_statuses = [t["status"] for t in targets]
+    assert ranked_statuses == ["suitable", "conditional", "insufficient_data", "unsuitable"]
+
+    # Verify #1 is Pimpri Site
+    assert targets[0]["target_location"]["name"] == "Pimpri Site"
+    assert targets[0]["score"] == 1.0
+    assert targets[0]["limiting_factors"] == []
+
+    # Verify #2 is Nashik Site
+    assert targets[1]["target_location"]["name"] == "Nashik Site"
+    assert targets[1]["status"] == "conditional"
+
+    # Verify #3 is Lonavala Site
+    assert targets[2]["target_location"]["name"] == "Lonavala Site"
+    assert targets[2]["status"] == "insufficient_data"
+
+    # Verify #4 is Niphad Site
+    assert targets[3]["target_location"]["name"] == "Niphad Site"
+    assert targets[3]["status"] == "unsuitable"
+    assert any("slope" in lf.lower() for lf in targets[3]["limiting_factors"])
+
+    # Verify each assessment was stored in the database
+    for t in targets:
+        assert isinstance(t["assessment_id"], int)
+        get_res = client.get(f"/api/assessments/{t['assessment_id']}")
+        assert get_res.status_code == 200
+
+
+def test_compare_page_route(client):
+    res = client.get("/compare")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "Compare Candidate Sites" in html
+    assert "decision-support prototype" in html  # PRD §13 disclaimer
+    assert "targetSitesContainer" in html
+    assert "btnRunComparison" in html
+    assert "leaderboardTable" in html
+
+
+
 
 
 

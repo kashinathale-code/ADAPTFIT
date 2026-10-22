@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from flask import Blueprint, current_app, jsonify, request
 
 from backend.compatibility_engine import (
+    DISCLAIMER,
     EngineConfig,
     Requirement,
     assess,
@@ -252,61 +253,38 @@ def geocode_endpoint():
 # POST /api/assessments                                                       #
 # --------------------------------------------------------------------------- #
 
-@api_bp.route("/assessments", methods=["POST"])
-def create_assessment():
-    """Run an adaptation compatibility assessment and save to SQLite."""
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return jsonify({"error": "Request body must be a valid JSON object."}), 400
-
-    adaptation_id = payload.get("adaptation_id")
-    if not adaptation_id or not isinstance(adaptation_id, str):
-        return jsonify({"error": "Missing or invalid 'adaptation_id'."}), 400
-
-    ref_loc = payload.get("reference_location")
-    tgt_loc = payload.get("target_location")
-
-    if not isinstance(ref_loc, dict) or not isinstance(tgt_loc, dict):
-        return (
-            jsonify(
-                {"error": "'reference_location' and 'target_location' must be objects."}
-            ),
-            400,
-        )
-
+def _run_single_assessment(
+    conn: sqlite3.Connection,
+    adaptation_id: str,
+    ref_loc: Dict[str, Any],
+    tgt_loc: Dict[str, Any],
+) -> Tuple[Optional[Dict[str, Any]], Optional[str], int]:
+    """
+    Execute a single adaptation compatibility assessment against a database connection.
+    Returns (response_dict, error_message, http_status_code).
+    """
     # Validate coordinates
     try:
         ref_lat, ref_lon = validate_coordinates(
             ref_loc.get("latitude"), ref_loc.get("longitude")
         )
     except ValueError as err:
-        return (
-            jsonify({"error": f"Invalid reference_location coordinates: {err}"}),
-            400,
-        )
+        return None, f"Invalid reference_location coordinates: {err}", 400
 
     try:
         tgt_lat, tgt_lon = validate_coordinates(
             tgt_loc.get("latitude"), tgt_loc.get("longitude")
         )
     except ValueError as err:
-        return (
-            jsonify({"error": f"Invalid target_location coordinates: {err}"}),
-            400,
-        )
+        return None, f"Invalid target_location coordinates: {err}", 400
 
-    conn = _get_db_connection()
     cur = conn.cursor()
 
     # Validate adaptation exists (404 if not found)
     cur.execute("SELECT id, name FROM adaptations WHERE id = ?", (adaptation_id,))
     adapt_row = cur.fetchone()
     if not adapt_row:
-        conn.close()
-        return (
-            jsonify({"error": f"Unknown adaptation '{adaptation_id}'."}),
-            404,
-        )
+        return None, f"Unknown adaptation '{adaptation_id}'.", 404
 
     # Load requirements from SQLite
     cur.execute(
@@ -320,11 +298,7 @@ def create_assessment():
     )
     req_rows = cur.fetchall()
     if not req_rows:
-        conn.close()
-        return (
-            jsonify({"error": f"No requirements defined for adaptation '{adaptation_id}'."}),
-            400,
-        )
+        return None, f"No requirements defined for adaptation '{adaptation_id}'.", 400
 
     requirements = [
         Requirement(
@@ -432,10 +406,6 @@ def create_assessment():
     # Save Assessment factors into SQLite
     factors_payload: List[Dict[str, Any]] = []
     for fr in assessment_res.factors:
-        # Store the real factor_status ("met" | "unmet" | "unknown").
-        # transfer_risk is a separate flag — never overwrite factor_status with
-        # "transfer_risk" because that loses the real status and causes the badge
-        # to incorrectly show "Met" for an unmet factor when the row is read back.
         cur.execute(
             """
             INSERT INTO assessment_factors
@@ -447,7 +417,7 @@ def create_assessment():
                 fr.factor,
                 fr.a_value,
                 fr.b_value,
-                fr.factor_status,   # always the real status: met / unmet / unknown
+                fr.factor_status,
                 fr.interpretation,
             ),
         )
@@ -473,9 +443,6 @@ def create_assessment():
                 "rule_version": fr.rule_version,
             }
         )
-
-    conn.commit()
-    conn.close()
 
     # Response strictly matching TRD Section 7
     response_body = {
@@ -534,7 +501,168 @@ def create_assessment():
             or any((f.get("factor") in ("open_space", "building_distance") and ((f.get("source") or "").startswith("Live") or (f.get("b_source") or "").startswith("Live") or (f.get("a_source") or "").startswith("Live"))) for f in factors_payload)
         ),
     }
-    return jsonify(response_body), 201
+    return response_body, None, 201
+
+
+@api_bp.route("/assessments", methods=["POST"])
+def create_assessment():
+    """Run an adaptation compatibility assessment and save to SQLite."""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a valid JSON object."}), 400
+
+    adaptation_id = payload.get("adaptation_id")
+    if not adaptation_id or not isinstance(adaptation_id, str):
+        return jsonify({"error": "Missing or invalid 'adaptation_id'."}), 400
+
+    ref_loc = payload.get("reference_location")
+    tgt_loc = payload.get("target_location")
+
+    if not isinstance(ref_loc, dict) or not isinstance(tgt_loc, dict):
+        return (
+            jsonify(
+                {"error": "'reference_location' and 'target_location' must be objects."}
+            ),
+            400,
+        )
+
+    conn = _get_db_connection()
+    try:
+        res, err, status_code = _run_single_assessment(conn, adaptation_id, ref_loc, tgt_loc)
+        if err:
+            conn.close()
+            return jsonify({"error": err}), status_code
+        conn.commit()
+        conn.close()
+        return jsonify(res), 201
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
+
+
+# --------------------------------------------------------------------------- #
+# POST /api/comparisons (FR-11: Compare multiple targets)                      #
+# --------------------------------------------------------------------------- #
+
+_STATUS_RANK_ORDER: Dict[str, int] = {
+    "suitable": 1,
+    "conditional": 2,
+    "insufficient_data": 3,
+    "unsuitable": 4,
+}
+
+
+@api_bp.route("/comparisons", methods=["POST"])
+def compare_targets():
+    """
+    Compare one reference location against up to 5 candidate target locations (FR-11).
+    Ranks targets primarily by screening status (suitable -> conditional ->
+    insufficient_data -> unsuitable) and secondarily by compatibility score descending.
+    """
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a valid JSON object."}), 400
+
+    adaptation_id = payload.get("adaptation_id")
+    if not adaptation_id or not isinstance(adaptation_id, str):
+        return jsonify({"error": "Missing or invalid 'adaptation_id'."}), 400
+
+    ref_loc = payload.get("reference_location")
+    if not isinstance(ref_loc, dict):
+        return jsonify({"error": "'reference_location' must be an object."}), 400
+
+    targets = payload.get("targets")
+    if not isinstance(targets, list):
+        return jsonify({"error": "'targets' must be a list of 1 to 5 target locations."}), 400
+    if len(targets) == 0:
+        return jsonify({"error": "'targets' must contain at least 1 target location."}), 400
+    if len(targets) > 5:
+        return jsonify({"error": "'targets' list cannot exceed 5 target locations."}), 400
+
+    conn = _get_db_connection()
+    try:
+        ranked_items: List[Dict[str, Any]] = []
+        for idx, tgt in enumerate(targets, start=1):
+            if not isinstance(tgt, dict):
+                conn.close()
+                return jsonify({"error": f"Target #{idx} must be a valid object."}), 400
+
+            tgt_name = tgt.get("name") or f"Target {idx}"
+            tgt_copy = dict(tgt)
+            tgt_copy["name"] = tgt_name
+
+            res, err, status_code = _run_single_assessment(conn, adaptation_id, ref_loc, tgt_copy)
+            if err:
+                conn.close()
+                return jsonify({"error": f"Target #{idx} ('{tgt_name}'): {err}"}), status_code
+
+            ranked_items.append(
+                {
+                    "assessment_id": res["assessment_id"],
+                    "target_location": res["target_location"],
+                    "status": res["status"],
+                    "score": res["score"],
+                    "limiting_factors": res["limiting_factors"],
+                    "supporting_factors": res["supporting_factors"],
+                    "suggested_checks": res["suggested_checks"],
+                    "data_quality_warnings": res["data_quality_warnings"],
+                    "data_badge_label": res["data_badge_label"],
+                    "factors": res["factors"],
+                }
+            )
+
+        # Rank targets by status priority, then score descending (None scores at the end of tier)
+        ranked_items.sort(
+            key=lambda x: (
+                _STATUS_RANK_ORDER.get(x["status"], 99),
+                -float(x["score"]) if x["score"] is not None else 1e9,
+            )
+        )
+
+        for rank_num, item in enumerate(ranked_items, start=1):
+            item["rank"] = rank_num
+
+        conn.commit()
+
+        # Query adaptation display name
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM adaptations WHERE id = ?", (adaptation_id,))
+        row = cur.fetchone()
+        adapt_name = row["name"] if row else adaptation_id
+
+        ref_name = ref_loc.get("name") or "Location A"
+        try:
+            r_lat, r_lon = validate_coordinates(ref_loc.get("latitude"), ref_loc.get("longitude"))
+        except Exception:
+            r_lat, r_lon = None, None
+
+        resp = jsonify(
+            {
+                "adaptation_id": adaptation_id,
+                "adaptation_name": adapt_name,
+                "reference_location": {
+                    "name": ref_name,
+                    "latitude": r_lat,
+                    "longitude": r_lon,
+                },
+                "total_targets": len(ranked_items),
+                "targets": ranked_items,
+                "disclaimer": DISCLAIMER,
+            }
+        )
+        return resp, 200
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 # --------------------------------------------------------------------------- #
