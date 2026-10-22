@@ -33,11 +33,6 @@ class Config:
     USE_LIVE_SOIL: bool = os.environ.get("USE_LIVE_SOIL", "false").lower() == "true"
     USE_LIVE_OSM: bool = os.environ.get("USE_LIVE_OSM", "false").lower() == "true"
 
-    # ------------------------------------------------------------------ #
-    # External API keys – loaded from env, never committed                #
-    # ------------------------------------------------------------------ #
-    NASA_POWER_API_KEY: str = os.environ.get("NASA_POWER_API_KEY", "")
-    SOILGRIDS_API_KEY: str = os.environ.get("SOILGRIDS_API_KEY", "")
 
     # ------------------------------------------------------------------ #
     # Caching                                                              #

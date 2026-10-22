@@ -180,8 +180,6 @@ Render's free tier spins down containers after inactivity and uses an ephemeral 
 | `MAX_MISSING_WEIGHT` | `0.30` | Maximum missing factor weight before status becomes `insufficient_data` |
 | `FLASK_DEBUG` | `false` | Enable Flask debug mode (`true` / `false`) |
 | `SECRET_KEY` | `change-me-in-production` | Secret key for session security |
-| `NASA_POWER_API_KEY` | `""` | Optional NASA POWER API key (loaded from env, never committed) |
-| `SOILGRIDS_API_KEY` | `""` | Optional SoilGrids API key (loaded from env, never committed) |
 
 ---
 

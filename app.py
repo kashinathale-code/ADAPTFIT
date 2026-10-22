@@ -40,7 +40,8 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         seed(db_path=db_path)
     else:
         # Validate that adaptations table is present
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout = 30000")
         cur = conn.cursor()
         cur.execute(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='adaptations'"

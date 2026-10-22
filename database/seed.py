@@ -31,177 +31,204 @@ def _load_schema() -> str:
         return fh.read()
 
 
+import time
+
 def seed(db_path: str = DEFAULT_DB_PATH, force: bool = False) -> None:
-    """Create tables and insert Rain Garden seed data.
+    """Create tables and insert Rain Garden seed data safely across multiple workers.
 
     Args:
         db_path: Path to the SQLite database file.
         force:   If True, delete and re-insert Rain Garden data even if present.
     """
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA foreign_keys = ON")
-    cur = conn.cursor()
+    os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+    lock_path = db_path + ".seed.lock"
+    lock_fd = None
+    acquired = False
 
-    # Create all tables (IF NOT EXISTS makes this safe to run repeatedly)
-    cur.executescript(_load_schema())
-    conn.commit()
+    start_time = time.time()
+    while time.time() - start_time < 15.0:
+        try:
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            acquired = True
+            break
+        except FileExistsError:
+            time.sleep(0.1)
 
-    # Guard against double-seeding
-    cur.execute("SELECT COUNT(*) FROM adaptations WHERE id = 'rain_garden'")
-    already_seeded = cur.fetchone()[0] > 0
+    try:
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA foreign_keys = ON")
+        cur = conn.cursor()
 
-    if already_seeded and not force:
-        print("Rain Garden seed data already present. Use --force to re-seed.")
-        conn.close()
-        return
-
-    if already_seeded and force:
-        cur.execute(
-            "DELETE FROM adaptation_requirements WHERE adaptation_id = 'rain_garden'"
-        )
-        cur.execute("DELETE FROM adaptations WHERE id = 'rain_garden'")
+        # Create all tables (IF NOT EXISTS makes this safe to run repeatedly)
+        cur.executescript(_load_schema())
         conn.commit()
-        print("Existing Rain Garden data deleted. Re-seeding …")
 
-    # ------------------------------------------------------------------ #
-    # Rain Garden adaptation record                                        #
-    # ------------------------------------------------------------------ #
-    cur.execute(
-        """
-        INSERT INTO adaptations (id, name, description, evidence_source)
-        VALUES (?, ?, ?, ?)
-        """,
-        (
-            "rain_garden",
-            "Rain Garden",
+        # Guard against double-seeding
+        cur.execute("SELECT COUNT(*) FROM adaptations WHERE id = 'rain_garden'")
+        already_seeded = cur.fetchone()[0] > 0
+
+        if already_seeded and not force:
+            print("Rain Garden seed data already present. Use --force to re-seed.")
+            conn.close()
+            return
+
+        if already_seeded and force:
+            cur.execute(
+                "DELETE FROM adaptation_requirements WHERE adaptation_id = 'rain_garden'"
+            )
+            cur.execute("DELETE FROM adaptations WHERE id = 'rain_garden'")
+            conn.commit()
+            print("Existing Rain Garden data deleted. Re-seeding …")
+
+        # ------------------------------------------------------------------ #
+        # Rain Garden adaptation record                                        #
+        # ------------------------------------------------------------------ #
+        cur.execute(
+            """
+            INSERT INTO adaptations (id, name, description, evidence_source)
+            VALUES (?, ?, ?, ?)
+            """,
             (
-                "A shallow, vegetated depression that captures and infiltrates stormwater "
-                "runoff from impervious surfaces, reducing peak flow and improving water quality."
+                "rain_garden",
+                "Rain Garden",
+                (
+                    "A shallow, vegetated depression that captures and infiltrates stormwater "
+                    "runoff from impervious surfaces, reducing peak flow and improving water quality."
+                ),
+                (
+                    "Candidate criteria. Sources pending expert review – "
+                    "see adaptation_requirements.evidence for per-factor notes."
+                ),
             ),
-            (
-                "Candidate criteria. Sources pending expert review – "
-                "see adaptation_requirements.evidence for per-factor notes."
-            ),
-        ),
-    )
+        )
 
-    # ------------------------------------------------------------------ #
-    # Rain Garden requirements (candidate, unverified – PRD §8)           #
-    # ------------------------------------------------------------------ #
-    # tolerance_type: "relative" → |B-A| > tolerance × |A|
-    #                 "absolute" → |B-A| > tolerance
-    #                 None       → no transfer-risk check
-    requirements = [
-        {
-            "adaptation_id": "rain_garden",
-            "factor": "soil_infiltration",
-            "min_value": 12.7,          # mm/hr (≈ 0.5 in/hr)
-            "max_value": None,
-            "unit": "mm/hr",
-            "weight": 0.35,
-            "is_critical": 1,
-            "transfer_tolerance": 0.50,  # 50 % of A
-            "tolerance_type": "relative",
-            "evidence": (
-                "candidate, unverified – provisional minimum of 12.7 mm/hr (0.5 in/hr) "
-                "based on typical municipal stormwater design guidance. "
-                "Cite and verify against the applicable local authority standards "
-                "before any planning or design use."
-            ),
-            "rule_version": "v0.1-candidate",
-        },
-        {
-            "adaptation_id": "rain_garden",
-            "factor": "slope",
-            "min_value": None,
-            "max_value": 8.0,           # %
-            "unit": "%",
-            "weight": 0.25,
-            "is_critical": 1,
-            "transfer_tolerance": 3.0,   # 3 percentage points
-            "tolerance_type": "absolute",
-            "evidence": (
-                "candidate, unverified – maximum slope of 8 % based on typical rain garden "
-                "design guidance; slopes above this generally require engineering controls "
-                "such as level-spreaders or check dams. "
-                "Cite local stormwater manual before use."
-            ),
-            "rule_version": "v0.1-candidate",
-        },
-        {
-            "adaptation_id": "rain_garden",
-            "factor": "annual_rainfall",
-            "min_value": 600.0,         # mm/yr  – placeholder lower bound
-            "max_value": 2500.0,        # mm/yr  – placeholder upper bound
-            "unit": "mm/yr",
-            "weight": 0.15,
-            "is_critical": 0,
-            "transfer_tolerance": 0.30,  # 30 % of A
-            "tolerance_type": "relative",
-            "evidence": (
-                "candidate, unverified – placeholder range 600–2500 mm/yr. "
-                "Actual suitability depends on runoff volume, design intent and "
-                "local stormwater targets. Verify against local climate records."
-            ),
-            "rule_version": "v0.1-candidate",
-        },
-        {
-            "adaptation_id": "rain_garden",
-            "factor": "open_space",
-            "min_value": None,          # binary: engine checks value >= 1.0 (present)
-            "max_value": None,
-            "unit": "binary (1=present, 0=absent)",
-            "weight": 0.15,
-            "is_critical": 0,
-            "transfer_tolerance": None,
-            "tolerance_type": None,
-            "evidence": (
-                "candidate, unverified – suitable open, unbuilt space accessible "
-                "and free from sub-surface utilities must be available at the site. "
-                "Binary indicator only; site survey required."
-            ),
-            "rule_version": "v0.1-candidate",
-        },
-        {
-            "adaptation_id": "rain_garden",
-            "factor": "building_distance",
-            "min_value": 3.0,           # m
-            "max_value": None,
-            "unit": "m",
-            "weight": 0.10,
-            "is_critical": 0,
-            "transfer_tolerance": None,
-            "tolerance_type": None,
-            "evidence": (
-                "candidate, unverified – minimum setback of 3 m from building foundations "
-                "to prevent moisture ingress. Verify against local building codes and "
-                "soil conditions before use."
-            ),
-            "rule_version": "v0.1-candidate",
-        },
-    ]
+        # ------------------------------------------------------------------ #
+        # Rain Garden requirements (candidate, unverified – PRD §8)           #
+        # ------------------------------------------------------------------ #
+        # tolerance_type: "relative" → |B-A| > tolerance × |A|
+        #                 "absolute" → |B-A| > tolerance
+        #                 None       → no transfer-risk check
+        requirements = [
+            {
+                "adaptation_id": "rain_garden",
+                "factor": "soil_infiltration",
+                "min_value": 12.7,          # mm/hr (≈ 0.5 in/hr)
+                "max_value": None,
+                "unit": "mm/hr",
+                "weight": 0.35,
+                "is_critical": 1,
+                "transfer_tolerance": 0.50,  # 50 % of A
+                "tolerance_type": "relative",
+                "evidence": (
+                    "candidate, unverified – provisional minimum of 12.7 mm/hr (0.5 in/hr) "
+                    "based on typical municipal stormwater design guidance. "
+                    "Cite and verify against the applicable local authority standards "
+                    "before any planning or design use."
+                ),
+                "rule_version": "v0.1-candidate",
+            },
+            {
+                "adaptation_id": "rain_garden",
+                "factor": "slope",
+                "min_value": None,
+                "max_value": 8.0,           # %
+                "unit": "%",
+                "weight": 0.25,
+                "is_critical": 1,
+                "transfer_tolerance": 3.0,   # 3 percentage points
+                "tolerance_type": "absolute",
+                "evidence": (
+                    "candidate, unverified – maximum slope of 8 % based on typical rain garden "
+                    "design guidance; slopes above this generally require engineering controls "
+                    "such as level-spreaders or check dams. "
+                    "Cite local stormwater manual before use."
+                ),
+                "rule_version": "v0.1-candidate",
+            },
+            {
+                "adaptation_id": "rain_garden",
+                "factor": "annual_rainfall",
+                "min_value": 600.0,         # mm/yr  – placeholder lower bound
+                "max_value": 2500.0,        # mm/yr  – placeholder upper bound
+                "unit": "mm/yr",
+                "weight": 0.15,
+                "is_critical": 0,
+                "transfer_tolerance": 0.30,  # 30 % of A
+                "tolerance_type": "relative",
+                "evidence": (
+                    "candidate, unverified – placeholder range 600–2500 mm/yr. "
+                    "Actual suitability depends on runoff volume, design intent and "
+                    "local stormwater targets. Verify against local climate records."
+                ),
+                "rule_version": "v0.1-candidate",
+            },
+            {
+                "adaptation_id": "rain_garden",
+                "factor": "open_space",
+                "min_value": None,          # binary: engine checks value >= 1.0 (present)
+                "max_value": None,
+                "unit": "binary (1=present, 0=absent)",
+                "weight": 0.15,
+                "is_critical": 0,
+                "transfer_tolerance": None,
+                "tolerance_type": None,
+                "evidence": (
+                    "candidate, unverified – suitable open, unbuilt space accessible "
+                    "and free from sub-surface utilities must be available at the site. "
+                    "Binary indicator only; site survey required."
+                ),
+                "rule_version": "v0.1-candidate",
+            },
+            {
+                "adaptation_id": "rain_garden",
+                "factor": "building_distance",
+                "min_value": 3.0,           # m
+                "max_value": None,
+                "unit": "m",
+                "weight": 0.10,
+                "is_critical": 0,
+                "transfer_tolerance": None,
+                "tolerance_type": None,
+                "evidence": (
+                    "candidate, unverified – minimum setback of 3 m from building foundations "
+                    "to prevent moisture ingress. Verify against local building codes and "
+                    "soil conditions before use."
+                ),
+                "rule_version": "v0.1-candidate",
+            },
+        ]
 
-    cur.executemany(
-        """
-        INSERT INTO adaptation_requirements
-            (adaptation_id, factor, min_value, max_value, unit, weight,
-             is_critical, transfer_tolerance, tolerance_type, evidence, rule_version)
-        VALUES
-            (:adaptation_id, :factor, :min_value, :max_value, :unit, :weight,
-             :is_critical, :transfer_tolerance, :tolerance_type, :evidence, :rule_version)
-        """,
-        requirements,
-    )
+        cur.executemany(
+            """
+            INSERT INTO adaptation_requirements
+                (adaptation_id, factor, min_value, max_value, unit, weight,
+                 is_critical, transfer_tolerance, tolerance_type, evidence, rule_version)
+            VALUES
+                (:adaptation_id, :factor, :min_value, :max_value, :unit, :weight,
+                 :is_critical, :transfer_tolerance, :tolerance_type, :evidence, :rule_version)
+            """,
+            requirements,
+        )
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
 
-    total_weight = sum(r["weight"] for r in requirements)
-    print(
-        f"Seeded Rain Garden adaptation with {len(requirements)} requirements "
-        f"(total weight = {total_weight:.2f}) into: {db_path}"
-    )
-    print("NOTE: All rules are 'candidate, unverified' – label them as such in the UI.")
+        total_weight = sum(r["weight"] for r in requirements)
+        print(
+            f"Seeded Rain Garden adaptation with {len(requirements)} requirements "
+            f"(total weight = {total_weight:.2f}) into: {db_path}"
+        )
+        print("NOTE: All rules are 'candidate, unverified' – label them as such in the UI.")
+    finally:
+        if acquired and lock_fd is not None:
+            try:
+                os.close(lock_fd)
+                if os.path.exists(lock_path):
+                    os.remove(lock_path)
+            except OSError:
+                pass
+
 
 
 # -------------------------------------------------------------------------- #
