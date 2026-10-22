@@ -448,5 +448,28 @@ def test_frontend_history_page(client):
     assert "View recent results" in index_html
 
 
+def test_self_hosted_leaflet_assets(client):
+    # Verify Leaflet CSS static vendor file
+    res_css = client.get("/static/vendor/leaflet/leaflet.css")
+    assert res_css.status_code == 200
+    assert "leaflet" in res_css.get_data(as_text=True).lower()
+
+    # Verify Leaflet JS static vendor file
+    res_js = client.get("/static/vendor/leaflet/leaflet.js")
+    assert res_js.status_code == 200
+
+    # Verify marker icon image exists
+    res_img = client.get("/static/vendor/leaflet/images/marker-icon.png")
+    assert res_img.status_code == 200
+
+    # Verify base.html references local vendor files rather than CDN
+    res_base = client.get("/")
+    html = res_base.get_data(as_text=True)
+    assert "/static/vendor/leaflet/leaflet.css" in html
+    assert "/static/vendor/leaflet/leaflet.js" in html
+    assert "unpkg.com/leaflet" not in html
+
+
+
 
 
