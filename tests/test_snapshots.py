@@ -353,3 +353,98 @@ def test_fetch_snapshots_script_flow():
                 os.remove(out_temp)
             except OSError:
                 pass
+
+
+# --------------------------------------------------------------------------- #
+# 8. Data status telemetry, cache loading, and dashboard panel tests          #
+# --------------------------------------------------------------------------- #
+
+def test_api_data_status_comprehensive_telemetry(test_db):
+    """GET /api/data-status returns flags, last_successful_fetch, last_error, and snapshot_file_date."""
+    app = create_app({
+        "TESTING": True,
+        "DATABASE_PATH": test_db,
+        "USE_LIVE_RAINFALL": True,
+        "USE_LIVE_SLOPE": True,
+        "USE_LIVE_SOIL": False,
+        "USE_LIVE_OSM": False,
+    })
+    client = app.test_client()
+
+    resp = client.get("/api/data-status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+
+    # Check flags as seen by server
+    assert "flags" in data
+    assert data["flags"]["USE_LIVE_RAINFALL"] is True
+    assert data["flags"]["USE_LIVE_SLOPE"] is True
+    assert data["flags"]["USE_LIVE_SOIL"] is False
+    assert data["flags"]["USE_LIVE_OSM"] is False
+
+    # Check telemetry fields
+    assert "last_successful_fetch" in data
+    assert "nasa_power" in data["last_successful_fetch"]
+    assert "open_meteo" in data["last_successful_fetch"]
+    assert "soilgrids" in data["last_successful_fetch"]
+    assert "overpass" in data["last_successful_fetch"]
+
+    assert "last_error" in data
+    assert "nasa_power" in data["last_error"]
+    assert "open_meteo" in data["last_error"]
+
+    assert "snapshot_file_date" in data
+    assert len(data["snapshot_file_date"]) == 10  # YYYY-MM-DD
+
+
+def test_load_snapshots_into_cache_only_really_fetched_values(test_db):
+    """load_snapshots_into_cache inserts only non-null values labeled 'Live (cached snapshot)'."""
+    from backend.data_fetcher import load_snapshots_into_cache
+    import sqlite3
+
+    loaded_count = load_snapshots_into_cache(db_path=test_db)
+    assert loaded_count > 0
+
+    conn = sqlite3.connect(test_db)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    # All loaded snapshot features must have non-null values and Live (cached snapshot) source
+    cur.execute(
+        "SELECT factor, value, source FROM environmental_features WHERE source LIKE 'Live (cached snapshot%'"
+    )
+    rows = cur.fetchall()
+    assert len(rows) > 0
+    for r in rows:
+        assert r["value"] is not None
+        assert "Live (cached snapshot" in r["source"]
+
+    # Verify Lonavala soil_infiltration was loaded with 0.3 mm/hr
+    cur.execute(
+        """
+        SELECT ef.value, ef.source FROM environmental_features ef
+        JOIN locations l ON ef.location_id = l.id
+        WHERE l.name = 'Lonavala' AND ef.factor = 'soil_infiltration'
+        """
+    )
+    lonavala_row = cur.fetchone()
+    assert lonavala_row is not None
+    assert lonavala_row["value"] == 0.3
+
+    conn.close()
+
+
+def test_dashboard_renders_data_sources_panel(test_db):
+    """Dashboard HTML renders Data Sources & Live Telemetry panel."""
+    app = create_app({"TESTING": True, "DATABASE_PATH": test_db})
+    client = app.test_client()
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.data.decode("utf-8")
+    assert "Data Sources &amp; Live Telemetry" in html
+    assert "srcCardNasa" in html
+    assert "srcCardOpenMeteo" in html
+    assert "srcCardSoilGrids" in html
+    assert "srcCardOverpass" in html
+

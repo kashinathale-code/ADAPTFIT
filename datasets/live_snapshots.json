@@ -1,5 +1,5 @@
 {
-  "_description": "Empirical live data snapshots for ADAPTFIT demonstration locations. Only includes values really fetched from external APIs.",
+  "_description": "Empirical live data snapshots for ADAPTFIT demonstration locations. Used when live external APIs are slow or unreachable.",
   "fetch_date": "2026-10-22",
   "locations": {
     "pune_city": {
@@ -22,6 +22,14 @@
           "resolution": "~1m positional (OSM contributor data)",
           "fetch_date": "2026-10-22",
           "transformation": "Nearest building centroid (bounding-box midpoint) from 18 OSM way[building] features within 200m; haversine distance = 15.0m"
+        },
+        "soil_infiltration": {
+          "value": null,
+          "unit": "mm/hr",
+          "source": "Estimated (proxy): SoilGrids v2.0 (ISRIC)",
+          "resolution": "250m (SoilGrids v2.0)",
+          "fetch_date": "2026-10-22",
+          "transformation": "SoilGrids returned no sand/clay/silt values at 5-15cm depth (unmeasured or urban sealed surface)"
         }
       }
     },
@@ -45,13 +53,21 @@
           "resolution": "~1m positional (OSM contributor data)",
           "fetch_date": "2026-10-22",
           "transformation": "Nearest building centroid within 200m; haversine distance = 18.0m"
+        },
+        "soil_infiltration": {
+          "value": null,
+          "unit": "mm/hr",
+          "source": "Estimated (proxy): SoilGrids v2.0 (ISRIC)",
+          "resolution": "250m (SoilGrids v2.0)",
+          "fetch_date": "2026-10-22",
+          "transformation": "SoilGrids returned no sand/clay/silt values at 5-15cm depth (unmeasured or urban sealed surface)"
         }
       }
     },
     "niphad": {
       "name": "Niphad",
-      "latitude": 20.0800,
-      "longitude": 74.1100,
+      "latitude": 20.08,
+      "longitude": 74.11,
       "factors": {
         "open_space": {
           "value": 1.0,
@@ -68,6 +84,14 @@
           "resolution": "~1m positional (OSM contributor data)",
           "fetch_date": "2026-10-22",
           "transformation": "Nearest building centroid within 200m; haversine distance = 22.0m"
+        },
+        "soil_infiltration": {
+          "value": null,
+          "unit": "mm/hr",
+          "source": "Estimated (proxy): SoilGrids v2.0 (ISRIC)",
+          "resolution": "250m (SoilGrids v2.0)",
+          "fetch_date": "2026-10-22",
+          "transformation": "SoilGrids returned no sand/clay/silt values at 5-15cm depth (unmeasured or urban sealed surface)"
         }
       }
     },
@@ -80,7 +104,7 @@
           "value": 0.3,
           "unit": "mm/hr",
           "source": "Estimated (proxy): SoilGrids v2.0 (ISRIC)",
-          "resolution": "250m (SoilGrids v2.0, 5-15cm depth)",
+          "resolution": "250m (SoilGrids v2.0)",
           "fetch_date": "2026-10-22",
           "transformation": "SoilGrids 5-15cm (sand=32.6%, silt=26.4%, clay=41.0%) -> USDA texture 'Clay' -> Ks = 0.3 mm/hr via Rawls et al. (1983) Table 1"
         },
@@ -122,6 +146,14 @@
           "resolution": "~1m positional (OSM contributor data)",
           "fetch_date": "2026-10-22",
           "transformation": "Nearest building centroid from 22 OSM way[building] features within 200m; haversine distance = 8.5m"
+        },
+        "soil_infiltration": {
+          "value": null,
+          "unit": "mm/hr",
+          "source": "Estimated (proxy): SoilGrids v2.0 (ISRIC)",
+          "resolution": "250m (SoilGrids v2.0)",
+          "fetch_date": "2026-10-22",
+          "transformation": "SoilGrids returned no sand/clay/silt values at 5-15cm depth (unmeasured or urban sealed surface)"
         }
       }
     }

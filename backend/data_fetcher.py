@@ -386,6 +386,219 @@ def get_saved_snapshot(
     return None
 
 
+# In-memory telemetry tracker for external data sources
+DATA_SOURCES_TELEMETRY: Dict[str, Dict[str, Optional[str]]] = {
+    "nasa_power": {"last_success": None, "last_error": None},
+    "open_meteo": {"last_success": None, "last_error": None},
+    "soilgrids": {"last_success": None, "last_error": None},
+    "overpass": {"last_success": None, "last_error": None},
+}
+
+
+def get_snapshot_file_date(snapshots_path: Optional[str] = None) -> str:
+    """Return the snapshot fetch date recorded in datasets/live_snapshots.json."""
+    snaps = load_live_snapshots(snapshots_path)
+    if snaps and snaps.get("fetch_date"):
+        return str(snaps["fetch_date"])
+    target_path = snapshots_path or DEFAULT_SNAPSHOTS_PATH
+    if os.path.exists(target_path):
+        mtime = os.path.getmtime(target_path)
+        return datetime.fromtimestamp(mtime, timezone.utc).strftime("%Y-%m-%d")
+    return "2026-10-22"
+
+
+def get_data_sources_telemetry(db_path: Optional[str] = None) -> Dict[str, Dict[str, Optional[str]]]:
+    """
+    Return telemetry on last successful fetch and last error per source.
+    If in-memory timestamp is None, inspects SQLite environmental_features table.
+    """
+    telemetry = {
+        "nasa_power": dict(DATA_SOURCES_TELEMETRY["nasa_power"]),
+        "open_meteo": dict(DATA_SOURCES_TELEMETRY["open_meteo"]),
+        "soilgrids": dict(DATA_SOURCES_TELEMETRY["soilgrids"]),
+        "overpass": dict(DATA_SOURCES_TELEMETRY["overpass"]),
+    }
+
+    target_db = db_path or Config.DATABASE_PATH
+    if os.path.exists(target_db):
+        try:
+            conn = sqlite3.connect(target_db)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            # Check NASA POWER
+            if not telemetry["nasa_power"]["last_success"]:
+                cur.execute(
+                    "SELECT retrieved_at FROM environmental_features WHERE source LIKE 'Live: NASA POWER%' ORDER BY id DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if row and row["retrieved_at"]:
+                    telemetry["nasa_power"]["last_success"] = row["retrieved_at"]
+
+            # Check Open-Meteo
+            if not telemetry["open_meteo"]["last_success"]:
+                cur.execute(
+                    "SELECT retrieved_at FROM environmental_features WHERE source LIKE 'Live: Open-Meteo%' ORDER BY id DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if row and row["retrieved_at"]:
+                    telemetry["open_meteo"]["last_success"] = row["retrieved_at"]
+
+            # Check SoilGrids
+            if not telemetry["soilgrids"]["last_success"]:
+                cur.execute(
+                    "SELECT retrieved_at FROM environmental_features WHERE source LIKE '%SoilGrids%' ORDER BY id DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if row and row["retrieved_at"]:
+                    telemetry["soilgrids"]["last_success"] = row["retrieved_at"]
+
+            # Check Overpass (non-snapshot)
+            if not telemetry["overpass"]["last_success"]:
+                cur.execute(
+                    "SELECT retrieved_at FROM environmental_features WHERE source LIKE 'Live: OpenStreetMap%' AND source NOT LIKE '%cached snapshot%' ORDER BY id DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if row and row["retrieved_at"]:
+                    telemetry["overpass"]["last_success"] = row["retrieved_at"]
+
+            conn.close()
+        except Exception:
+            pass
+
+    return telemetry
+
+
+def load_snapshots_into_cache(db_path: Optional[str] = None, snapshots_path: Optional[str] = None) -> int:
+    """
+    Load live data snapshots from datasets/live_snapshots.json into SQLite environmental_features table.
+    ONLY values that were REALLY FETCHED (value is not None) are loaded, labeled
+    'Live (cached snapshot, <fetch date>)'.
+    Values that are null/unmeasured stay Demo values from CSV or seed.
+    Returns the count of loaded features.
+    """
+    target_db = db_path or Config.DATABASE_PATH
+    if not os.path.exists(target_db):
+        return 0
+
+    snaps = load_live_snapshots(snapshots_path)
+    if not snaps:
+        return 0
+
+    global_date = snaps.get("fetch_date", "2026-10-22")
+    locations = snaps.get("locations", {})
+    count = 0
+
+    try:
+        conn = sqlite3.connect(target_db, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        for loc_key, loc_info in locations.items():
+            name = loc_info.get("name")
+            lat = loc_info.get("latitude")
+            lon = loc_info.get("longitude")
+            if lat is None or lon is None:
+                continue
+
+            # Look up or insert location
+            cur.execute(
+                "SELECT id FROM locations WHERE ABS(latitude - ?) < 0.001 AND ABS(longitude - ?) < 0.001 LIMIT 1",
+                (lat, lon),
+            )
+            loc_row = cur.fetchone()
+            if loc_row:
+                loc_id = loc_row["id"]
+            else:
+                cur.execute(
+                    "INSERT INTO locations (name, latitude, longitude) VALUES (?, ?, ?)",
+                    (name or loc_key.replace("_", " ").title(), lat, lon),
+                )
+                loc_id = cur.lastrowid
+
+            factors = loc_info.get("factors", {})
+            for factor_key, factor_dict in factors.items():
+                val = factor_dict.get("value")
+                # ONLY for values really fetched!
+                if val is None:
+                    continue
+
+                fetch_date = factor_dict.get("fetch_date") or global_date
+                source_label = f"Live (cached snapshot, {fetch_date})"
+                unit = factor_dict.get("unit", "")
+                resolution = factor_dict.get("resolution", "")
+                data_date = factor_dict.get("data_date") or fetch_date
+                transformation = factor_dict.get("transformation", "Retrieved from cached live snapshot")
+                now_iso = datetime.now(timezone.utc).isoformat()
+
+                # Check if feature already exists
+                cur.execute(
+                    "SELECT id, source FROM environmental_features WHERE location_id = ? AND factor = ? LIMIT 1",
+                    (loc_id, factor_key),
+                )
+                existing = cur.fetchone()
+                if not existing:
+                    cur.execute(
+                        """
+                        INSERT INTO environmental_features
+                            (location_id, factor, value, unit, source, resolution, data_date, retrieved_at, transformation)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (loc_id, factor_key, val, unit, source_label, resolution, data_date, now_iso, transformation),
+                    )
+                    count += 1
+                elif existing["source"] and not existing["source"].startswith("Live:"):
+                    cur.execute(
+                        """
+                        UPDATE environmental_features
+                        SET value = ?, unit = ?, source = ?, resolution = ?, data_date = ?, retrieved_at = ?, transformation = ?
+                        WHERE id = ?
+                        """,
+                        (val, unit, source_label, resolution, data_date, now_iso, transformation, existing["id"]),
+                    )
+                    count += 1
+
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+    return count
+
+
+def warm_cache_demo_locations(db_path: Optional[str] = None, csv_path: Optional[str] = None) -> None:
+    """
+    Warm cache for demonstration locations (Pune, Pimpri, Niphad, Lonavala, Nashik)
+    by fetching live environmental data. Run in a background thread at startup.
+    Never blocks boot and never raises exceptions.
+    """
+    demo_locs = [
+        ("Pune city", 18.5204, 73.8567),
+        ("Pimpri", 18.6298, 73.7997),
+        ("Niphad", 20.0800, 74.1100),
+        ("Lonavala", 18.7557, 73.4091),
+        ("Nashik city", 19.9975, 73.7898),
+    ]
+    target_db = db_path or Config.DATABASE_PATH
+    for name, lat, lon in demo_locs:
+        try:
+            fetch_location_environmental_data(
+                lat=lat,
+                lon=lon,
+                name=name,
+                csv_path=csv_path,
+                db_path=target_db,
+                use_live_rainfall=True,
+                use_live_slope=True,
+                use_live_soil=True,
+                use_live_osm=True,
+            )
+        except Exception:
+            pass
+
+
+
 def get_cached_feature(
     factor: str,
     lat: float,
@@ -416,6 +629,10 @@ def get_cached_feature(
         row = cur.fetchone()
         conn.close()
         if not row or not row["retrieved_at"]:
+            return None
+
+        # Cached snapshot rows loaded at boot are fallbacks, not live API cache hits
+        if row["source"] and row["source"].startswith("Live (cached snapshot"):
             return None
 
         # Check staleness
@@ -656,11 +873,14 @@ def fetch_open_meteo_slope(
             name=name,
         )
 
+        DATA_SOURCES_TELEMETRY["open_meteo"]["last_success"] = now_iso
+        DATA_SOURCES_TELEMETRY["open_meteo"]["last_error"] = None
         return slope_pct, meta, None
 
-    except (requests.RequestException, ValueError, KeyError):
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        DATA_SOURCES_TELEMETRY["open_meteo"]["last_error"] = str(exc)
         snapshot = get_saved_snapshot("slope", lat, lon, name, snapshots_path)
-        if snapshot is not None:
+        if snapshot is not None and snapshot.get("value") is not None:
             snap_val = snapshot.get("value")
             snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
             snap_res = snapshot.get("resolution") or OPEN_METEO_ELEVATION_RESOLUTION
@@ -764,11 +984,14 @@ def fetch_nasa_power_rainfall(
             name=name,
         )
 
+        DATA_SOURCES_TELEMETRY["nasa_power"]["last_success"] = now_iso
+        DATA_SOURCES_TELEMETRY["nasa_power"]["last_error"] = None
         return ann_yearly, meta, None
 
-    except (requests.RequestException, ValueError, KeyError):
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        DATA_SOURCES_TELEMETRY["nasa_power"]["last_error"] = str(exc)
         snapshot = get_saved_snapshot("annual_rainfall", lat, lon, name, snapshots_path)
-        if snapshot is not None:
+        if snapshot is not None and snapshot.get("value") is not None:
             snap_val = snapshot.get("value")
             snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
             snap_res = snapshot.get("resolution") or NASA_POWER_RESOLUTION
@@ -874,8 +1097,11 @@ def fetch_soilgrids_infiltration(
                 fractions[prop] = None
 
         if any(fractions.get(p) is None for p in ("sand", "clay", "silt")):
+            DATA_SOURCES_TELEMETRY["soilgrids"]["last_error"] = (
+                "SoilGrids returned no sand/clay/silt values at 5-15cm depth (unmeasured or urban sealed surface)"
+            )
             snapshot = get_saved_snapshot("soil_infiltration", lat, lon, name, snapshots_path)
-            if snapshot is not None:
+            if snapshot is not None and snapshot.get("value") is not None:
                 snap_val = snapshot.get("value")
                 snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
                 snap_res = snapshot.get("resolution") or SOILGRIDS_RESOLUTION
@@ -906,8 +1132,11 @@ def fetch_soilgrids_infiltration(
         silt_pct = fractions["silt"]
         texture_class = classify_usda_texture(sand_pct, silt_pct, clay_pct)
         if not texture_class:
+            DATA_SOURCES_TELEMETRY["soilgrids"]["last_error"] = (
+                f"SoilGrids fractions ({sand_pct}%, {silt_pct}%, {clay_pct}%) could not be classified into USDA texture"
+            )
             snapshot = get_saved_snapshot("soil_infiltration", lat, lon, name, snapshots_path)
-            if snapshot is not None:
+            if snapshot is not None and snapshot.get("value") is not None:
                 snap_val = snapshot.get("value")
                 snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
                 snap_res = snapshot.get("resolution") or SOILGRIDS_RESOLUTION
@@ -935,8 +1164,11 @@ def fetch_soilgrids_infiltration(
 
         ks = infiltration_from_texture(texture_class)
         if ks is None:
+            DATA_SOURCES_TELEMETRY["soilgrids"]["last_error"] = (
+                f"SoilGrids returned texture class '{texture_class}' not in Rawls table"
+            )
             snapshot = get_saved_snapshot("soil_infiltration", lat, lon, name, snapshots_path)
-            if snapshot is not None:
+            if snapshot is not None and snapshot.get("value") is not None:
                 snap_val = snapshot.get("value")
                 snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
                 snap_res = snapshot.get("resolution") or SOILGRIDS_RESOLUTION
@@ -996,11 +1228,14 @@ def fetch_soilgrids_infiltration(
             name=name,
         )
 
+        DATA_SOURCES_TELEMETRY["soilgrids"]["last_success"] = now_iso
+        DATA_SOURCES_TELEMETRY["soilgrids"]["last_error"] = None
         return ks, meta, None
 
-    except (requests.RequestException, ValueError, KeyError):
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        DATA_SOURCES_TELEMETRY["soilgrids"]["last_error"] = str(exc)
         snapshot = get_saved_snapshot("soil_infiltration", lat, lon, name, snapshots_path)
-        if snapshot is not None:
+        if snapshot is not None and snapshot.get("value") is not None:
             snap_val = snapshot.get("value")
             snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
             snap_res = snapshot.get("resolution") or SOILGRIDS_RESOLUTION
@@ -1137,6 +1372,8 @@ def fetch_osm_open_space(
                 name=name,
             )
 
+            DATA_SOURCES_TELEMETRY["overpass"]["last_success"] = now_iso
+            DATA_SOURCES_TELEMETRY["overpass"]["last_error"] = None
             success = True
             break
         except (requests.RequestException, ValueError, KeyError):
@@ -1145,9 +1382,10 @@ def fetch_osm_open_space(
     if success and meta is not None:
         return open_space_val, meta, None
 
+    DATA_SOURCES_TELEMETRY["overpass"]["last_error"] = "All Overpass mirrors timed out or failed (>5s connect)"
     # Fallback to saved snapshot
     snapshot = get_saved_snapshot("open_space", lat, lon, name, snapshots_path)
-    if snapshot is not None:
+    if snapshot is not None and snapshot.get("value") is not None:
         snap_val = snapshot.get("value")
         snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
         snap_res = snapshot.get("resolution") or OSM_RESOLUTION
@@ -1290,6 +1528,8 @@ def fetch_osm_building_distance(
                 name=name,
             )
 
+            DATA_SOURCES_TELEMETRY["overpass"]["last_success"] = now_iso
+            DATA_SOURCES_TELEMETRY["overpass"]["last_error"] = None
             success = True
             break
         except (requests.RequestException, ValueError, KeyError):
@@ -1298,9 +1538,10 @@ def fetch_osm_building_distance(
     if success and meta is not None:
         return dist_m, meta, None
 
+    DATA_SOURCES_TELEMETRY["overpass"]["last_error"] = "All Overpass mirrors timed out or failed (>5s connect)"
     # Fallback to saved snapshot
     snapshot = get_saved_snapshot("building_distance", lat, lon, name, snapshots_path)
-    if snapshot is not None:
+    if snapshot is not None and snapshot.get("value") is not None:
         snap_val = snapshot.get("value")
         snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
         snap_res = snapshot.get("resolution") or OSM_RESOLUTION
@@ -1573,6 +1814,16 @@ def fetch_location_environmental_data(
                 use_live_osm = getattr(Config, "USE_LIVE_OSM", False)
         except (RuntimeError, ImportError):
             use_live_osm = getattr(Config, "USE_LIVE_OSM", False)
+
+    def _parse_bool(v: Any) -> bool:
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes")
+        return bool(v)
+
+    use_live_rainfall = _parse_bool(use_live_rainfall)
+    use_live_slope = _parse_bool(use_live_slope)
+    use_live_soil = _parse_bool(use_live_soil)
+    use_live_osm = _parse_bool(use_live_osm)
 
     if staleness_hours is None:
         try:

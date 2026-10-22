@@ -150,8 +150,64 @@ def _get_db_connection() -> sqlite3.Connection:
 
 @api_bp.route("/data-status", methods=["GET"])
 def get_data_status():
-    """Return data-driven header badge status and active live flags."""
-    return jsonify(get_configured_badge_info(current_app.config))
+    """Return data-driven header badge status, active live flags, and sources telemetry."""
+    cfg = current_app.config
+
+    def _get_flag(key: str) -> bool:
+        if hasattr(cfg, "get"):
+            v = cfg.get(key, getattr(Config, key, False))
+        else:
+            v = getattr(cfg, key, getattr(Config, key, False))
+        if isinstance(v, str):
+            return v.lower() == "true"
+        return bool(v)
+
+    live_rain = _get_flag("USE_LIVE_RAINFALL")
+    live_slope = _get_flag("USE_LIVE_SLOPE")
+    live_soil = _get_flag("USE_LIVE_SOIL")
+    live_osm = _get_flag("USE_LIVE_OSM")
+
+    flags = {
+        "USE_LIVE_RAINFALL": live_rain,
+        "USE_LIVE_SLOPE": live_slope,
+        "USE_LIVE_SOIL": live_soil,
+        "USE_LIVE_OSM": live_osm,
+    }
+
+    from backend.data_fetcher import get_data_sources_telemetry, get_snapshot_file_date
+    db_path = current_app.config.get("DATABASE_PATH", Config.DATABASE_PATH)
+    telemetry = get_data_sources_telemetry(db_path=db_path)
+    snapshot_date = get_snapshot_file_date()
+
+    badge_info = get_configured_badge_info(current_app.config)
+
+    response = {
+        "flags": flags,
+        "live_flags": {
+            "rainfall": live_rain,
+            "slope": live_slope,
+            "soil": live_soil,
+            "osm": live_osm,
+        },
+        "last_successful_fetch": {
+            "nasa_power": telemetry.get("nasa_power", {}).get("last_success"),
+            "open_meteo": telemetry.get("open_meteo", {}).get("last_success"),
+            "soilgrids": telemetry.get("soilgrids", {}).get("last_success"),
+            "overpass": telemetry.get("overpass", {}).get("last_success"),
+        },
+        "last_error": {
+            "nasa_power": telemetry.get("nasa_power", {}).get("last_error"),
+            "open_meteo": telemetry.get("open_meteo", {}).get("last_error"),
+            "soilgrids": telemetry.get("soilgrids", {}).get("last_error"),
+            "overpass": telemetry.get("overpass", {}).get("last_error"),
+        },
+        "snapshot_file_date": snapshot_date,
+        "snapshot_date": snapshot_date,
+        "text": badge_info["text"],
+        "is_live": badge_info["is_live"],
+        "badge_class": badge_info["badge_class"],
+    }
+    return jsonify(response), 200
 
 
 # --------------------------------------------------------------------------- #
@@ -565,8 +621,8 @@ def create_assessment():
     if not adaptation_id or not isinstance(adaptation_id, str):
         return jsonify({"error": "Missing or invalid 'adaptation_id'."}), 400
 
-    ref_loc = payload.get("reference_location")
-    tgt_loc = payload.get("target_location")
+    ref_loc = payload.get("reference_location") or payload.get("location_a")
+    tgt_loc = payload.get("target_location") or payload.get("location_b")
 
     if not isinstance(ref_loc, dict) or not isinstance(tgt_loc, dict):
         return (

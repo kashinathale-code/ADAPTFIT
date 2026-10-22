@@ -238,21 +238,19 @@ ADAPTFIT comes with built-in sample locations in Western Maharashtra (`datasets/
 1. **Suitable (Green):**
    - **Reference (A):** Pune city (`18.5204, 73.8567`)
    - **Target (B):** Pimpri (`18.6298, 73.7997`)
-   - *Outcome:* Infiltration (25 mm/hr) and slope (2% in CSV, 0.7% in live DEM) satisfy requirements, and rainfall is within transfer tolerance. Overall score $\ge 0.75$.
-2. **Unsuitable (Red - Critical Blocker):**
-   - **Static CSV mode:** Pune $\rightarrow$ Niphad (`20.0800, 74.1100`) where CSV slope is 12%, exceeding the critical maximum of 8.0%. Critical blocker triggers immediate `Unsuitable` status.
-   - **Override panel:** Click **"Unsuitable (Blocker)"** (simulates slope = 14.5%) to demo this status on demand.
-3. **Insufficient Data (Grey - Missingness Rule):**
-   - **Reference (A):** Pune city (`18.5204, 73.8567`)
-   - **Target (B):** Lonavala (`18.7557, 73.4091`)
-   - *Outcome:* Soil infiltration is NULL / unmeasured. Because infiltration is a critical factor (weight 0.35 > 0.30 threshold), status is immediately `Insufficient Data`.
-   - **Override panel:** Click **"Insufficient Data (Missing)"** to demo missing critical factor handling.
-4. **Conditional (Amber - Non-Critical Limitation / Transfer Risk):**
+   - *Outcome:* Infiltration (25 mm/hr) and slope (0.7% in live Copernicus DEM) satisfy requirements, and rainfall is within transfer tolerance. Overall score `1.0`.
+2. **Conditional (Amber - Non-Critical Limitation / Transfer Risk):**
    - **Reference (A):** Pune city (`18.5204, 73.8567`)
    - **Target (B):** Nashik city (`19.9975, 73.7898`)
-   - *Outcome:* Open space indicator is 0 (absent), which is a non-critical factor (weight 0.15). Condition requires on-site spatial survey before implementation.
-   - *Note on Live APIs:* When live APIs are active (`run_live.ps1`), Pune $\rightarrow$ Niphad also produces `Conditional` because NASA POWER rainfall differs significantly (858 vs 1731 mm/yr, $>30\%$ transfer tolerance).
-   - **Override panel:** Click **"Conditional (Survey/Risk)"** to demo non-critical missingness or transfer risk on demand.
+   - *Outcome:* Open space indicator is 0 (absent from OSM query), which is a non-critical factor (weight 0.15). Status is `Conditional` (score `0.85`), requiring on-site spatial survey.
+   - *Note on Niphad:* When live APIs are active, Pune $\rightarrow$ Niphad (`20.0800, 74.1100`) also produces `Conditional` (score `1.0`) because live NASA POWER rainfall differs significantly (858.3 vs 1731.3 mm/yr, $>30\%$ transfer tolerance).
+3. **Unsuitable (Red - Critical Blocker):**
+   - **Live API mode:** Pune $\rightarrow$ Lonavala (`18.7557, 73.4091`) where real SoilGrids fetch at 5-15cm depth measures 41% clay, translating to $K_s = 0.3\text{ mm/hr}$ via Rawls et al. (1983). Because 0.3 mm/hr is well below the critical minimum of 12.7 mm/hr, the engine triggers the Critical Blocker Override to `Unsuitable`.
+   - **Static CSV mode:** Pune $\rightarrow$ Niphad where CSV slope is 12.0%, exceeding the critical maximum of 8.0%.
+   - **Override panel:** Click **"Unsuitable (Blocker)"** (simulates slope = 14.5%) to demo this status on demand.
+4. **Insufficient Data (Grey - Missingness Rule):**
+   - **Static CSV mode:** Pune $\rightarrow$ Lonavala where soil infiltration is NULL in the sample CSV. Because infiltration is a critical factor (weight 0.35 > 0.30 threshold), status is `Insufficient Data`.
+   - **Override panel:** Click **"Insufficient Data (Missing)"** to demo missing critical factor handling on demand.
 
 ---
 

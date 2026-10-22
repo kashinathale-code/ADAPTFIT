@@ -57,6 +57,114 @@
     </div>
   </section>
 
+  <!-- Data Sources & Live Telemetry Panel -->
+  <section class="data-sources-section">
+    <div class="data-sources-card">
+      <div class="data-sources-header">
+        <div class="data-sources-title-group">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+          </svg>
+          <div>
+            <h2 class="data-sources-title">Data Sources &amp; Live Telemetry</h2>
+            <p class="data-sources-subtitle">Real-time status of environmental data feeds, satellite models, and empirical snapshots.</p>
+          </div>
+        </div>
+        <div class="data-sources-meta">
+          <span class="badge-status-pill" id="dashboardSnapshotBadge">Snapshot: loading...</span>
+        </div>
+      </div>
+
+      <div class="data-sources-grid">
+        <!-- NASA POWER -->
+        <div class="source-card" id="srcCardNasa">
+          <div class="source-card-top">
+            <div class="source-title-row">
+              <span class="source-dot" id="srcDotNasa"></span>
+              <strong class="source-name">NASA POWER</strong>
+            </div>
+            <span class="source-flag-badge" id="flagBadgeNasa">Checking...</span>
+          </div>
+          <div class="source-feed-factor">Annual Rainfall (Precipitation)</div>
+          <div class="source-detail-row">
+            <span class="detail-label">Resolution:</span>
+            <span class="detail-val">0.5° × 0.5° (~50 km)</span>
+          </div>
+          <div class="source-detail-row">
+            <span class="detail-label">Last fetch:</span>
+            <span class="detail-val" id="lastFetchNasa">--</span>
+          </div>
+          <div class="source-error-text" id="errNasa" style="display: none;"></div>
+        </div>
+
+        <!-- Open-Meteo -->
+        <div class="source-card" id="srcCardOpenMeteo">
+          <div class="source-card-top">
+            <div class="source-title-row">
+              <span class="source-dot" id="srcDotOpenMeteo"></span>
+              <strong class="source-name">Open-Meteo DEM</strong>
+            </div>
+            <span class="source-flag-badge" id="flagBadgeOpenMeteo">Checking...</span>
+          </div>
+          <div class="source-feed-factor">Slope (Copernicus DEM GLO-90)</div>
+          <div class="source-detail-row">
+            <span class="detail-label">Resolution:</span>
+            <span class="detail-val">90m elevation gradient</span>
+          </div>
+          <div class="source-detail-row">
+            <span class="detail-label">Last fetch:</span>
+            <span class="detail-val" id="lastFetchOpenMeteo">--</span>
+          </div>
+          <div class="source-error-text" id="errOpenMeteo" style="display: none;"></div>
+        </div>
+
+        <!-- ISRIC SoilGrids -->
+        <div class="source-card" id="srcCardSoilGrids">
+          <div class="source-card-top">
+            <div class="source-title-row">
+              <span class="source-dot" id="srcDotSoilGrids"></span>
+              <strong class="source-name">ISRIC SoilGrids v2.0</strong>
+            </div>
+            <span class="source-flag-badge" id="flagBadgeSoilGrids">Checking...</span>
+          </div>
+          <div class="source-feed-factor">Soil Infiltration (Ks proxy)</div>
+          <div class="source-detail-row">
+            <span class="detail-label">Resolution:</span>
+            <span class="detail-val">250m texture (5-15cm depth)</span>
+          </div>
+          <div class="source-detail-row">
+            <span class="detail-label">Last fetch:</span>
+            <span class="detail-val" id="lastFetchSoilGrids">--</span>
+          </div>
+          <div class="source-error-text" id="errSoilGrids" style="display: none;"></div>
+        </div>
+
+        <!-- OSM Overpass -->
+        <div class="source-card" id="srcCardOverpass">
+          <div class="source-card-top">
+            <div class="source-title-row">
+              <span class="source-dot" id="srcDotOverpass"></span>
+              <strong class="source-name">OSM Overpass</strong>
+            </div>
+            <span class="source-flag-badge" id="flagBadgeOverpass">Checking...</span>
+          </div>
+          <div class="source-feed-factor">Open Space &amp; Building Distance</div>
+          <div class="source-detail-row">
+            <span class="detail-label">Resolution:</span>
+            <span class="detail-val">~1m vector data</span>
+          </div>
+          <div class="source-detail-row">
+            <span class="detail-label">Status:</span>
+            <span class="detail-val" id="lastFetchOverpass">--</span>
+          </div>
+          <div class="source-error-text" id="errOverpass" style="display: none;"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Key Principles Grid -->
   <section class="features-section">
     <div class="section-header">
@@ -134,4 +242,87 @@
   </section>
 
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    fetch("/api/data-status")
+      .then(function(res) { if (res.ok) return res.json(); })
+      .then(function(data) {
+        if (!data) return;
+
+        // Snapshot date badge
+        var snapBadge = document.getElementById("dashboardSnapshotBadge");
+        if (snapBadge) {
+          snapBadge.textContent = "Snapshot: " + (data.snapshot_file_date || data.snapshot_date || "2026-10-22");
+        }
+
+        // Helper to format ISO date nicely
+        function fmtDate(iso) {
+          if (!iso) return "None yet / cached seed";
+          try {
+            var d = new Date(iso);
+            if (isNaN(d.getTime())) return iso;
+            return d.toLocaleDateString() + " " + d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+          } catch(e) {
+            return iso;
+          }
+        }
+
+        // Helper to set source card state
+        function setCard(prefix, isLiveFlag, lastSuccess, lastError) {
+          var dot = document.getElementById("srcDot" + prefix);
+          var badge = document.getElementById("flagBadge" + prefix);
+          var lastEl = document.getElementById("lastFetch" + prefix);
+          var errEl = document.getElementById("err" + prefix);
+
+          if (badge) {
+            if (isLiveFlag) {
+              badge.textContent = "Live Feed: ON";
+              badge.className = "source-flag-badge badge-flag-on";
+            } else {
+              badge.textContent = "Live Feed: OFF";
+              badge.className = "source-flag-badge badge-flag-off";
+            }
+          }
+
+          if (dot) {
+            if (isLiveFlag && lastSuccess) {
+              dot.className = "source-dot dot-live";
+            } else if (lastSuccess) {
+              dot.className = "source-dot dot-snapshot";
+            } else {
+              dot.className = "source-dot dot-demo";
+            }
+          }
+
+          if (lastEl) {
+            lastEl.textContent = fmtDate(lastSuccess);
+          }
+
+          if (errEl) {
+            if (lastError) {
+              errEl.textContent = "Note: " + lastError;
+              errEl.style.display = "block";
+            } else {
+              errEl.style.display = "none";
+            }
+          }
+        }
+
+        var flags = data.flags || {};
+        var succ = data.last_successful_fetch || {};
+        var errs = data.last_error || {};
+
+        setCard("Nasa", flags.USE_LIVE_RAINFALL, succ.nasa_power, errs.nasa_power);
+        setCard("OpenMeteo", flags.USE_LIVE_SLOPE, succ.open_meteo, errs.open_meteo);
+        setCard("SoilGrids", flags.USE_LIVE_SOIL, succ.soilgrids, errs.soilgrids);
+        setCard("Overpass", flags.USE_LIVE_OSM, succ.overpass, errs.overpass);
+      })
+      .catch(function(err) {
+        console.warn("Could not load data-status", err);
+      });
+  });
+</script>
 {% endblock %}
