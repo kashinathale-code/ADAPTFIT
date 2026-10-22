@@ -18,6 +18,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from config import Config
+from backend.gis_processor import (
+    haversine_distance,
+    get_slope_sampling_offsets,
+    calculate_slope_from_elevations,
+)
 
 # Standard factor units used across ADAPTFIT
 FACTOR_UNITS: Dict[str, str] = {
@@ -349,21 +354,7 @@ def fetch_open_meteo_slope(
         )
 
     # 2. Compute 4 neighbouring points approximately 100 m away
-    # 1 degree of latitude is ~111,320 m
-    delta_lat = 100.0 / 111320.0
-    lat_north = lat + delta_lat
-    lat_south = lat - delta_lat
-
-    cos_lat = math.cos(math.radians(lat))
-    if abs(cos_lat) < 1e-6:
-        cos_lat = 1e-6
-    delta_lon = 100.0 / (111320.0 * cos_lat)
-    lon_east = lon + delta_lon
-    lon_west = lon - delta_lon
-
-    # Points order: [center, north, south, east, west]
-    lats = [lat, lat_north, lat_south, lat, lat]
-    lons = [lon, lon, lon, lon_east, lon_west]
+    lats, lons = get_slope_sampling_offsets(lat, lon, distance_m=100.0)
     lat_param = ",".join(f"{x:.6f}" for x in lats)
     lon_param = ",".join(f"{y:.6f}" for y in lons)
 
@@ -387,12 +378,10 @@ def fetch_open_meteo_slope(
         z_east = float(elevations[3])
         z_west = float(elevations[4])
 
-        # Slope in percent via 4-neighbour central difference gradient:
-        # Distance between East and West is 200m; distance between North and South is 200m
-        dz_dx = (z_east - z_west) / 200.0
-        dz_dy = (z_north - z_south) / 200.0
-        gradient = math.sqrt(dz_dx ** 2 + dz_dy ** 2)
-        slope_pct = round(gradient * 100.0, 1)
+        # Slope in percent via 4-neighbour central difference gradient calculated in gis_processor
+        slope_pct = calculate_slope_from_elevations(
+            z_center, z_north, z_south, z_east, z_west, distance_m=100.0
+        )
 
         now_iso = datetime.now(timezone.utc).isoformat()
         transformation = (
@@ -876,20 +865,6 @@ def fetch_osm_building_distance(
             "Live building_distance data from OpenStreetMap was unavailable; fell back to demo/sample data.",
         )
 
-
-def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate the great-circle distance between two points in kilometers."""
-    r = 6371.0  # Earth radius in kilometers
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-
-    a = (
-        math.sin(delta_phi / 2.0) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
-    )
-    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-    return r * c
 
 
 def _parse_float(val: Any) -> Optional[float]:

@@ -44,7 +44,7 @@ Browser UI → Flask API → data adapters + SQLite → feature processing → c
 | `backend/gis_processor.py` | Coordinates, raster/vector reads, boundary checks |
 | `backend/compatibility_engine.py` | Rules, scoring, status, explanations |
 | `database/schema.sql` | Table definitions and seed rules |
-| `frontend/` | Templates, CSS, `map.js`, `assessment.js` |
+| `frontend/` | Templates, CSS, `assessment.js`, `results.js` |
 | `tests/` | Data and engine tests |
 
 **Design principle:** each module is independently testable. The engine must run without live APIs; data fetching must run without the UI.
@@ -59,8 +59,8 @@ ADAPTFIT/
   frontend/
     templates/ (index.html, results.html)
     static/css/style.css
-    static/js/map.js
     static/js/assessment.js
+    static/js/results.js
   backend/
     routes.py
     data_fetcher.py

@@ -82,7 +82,7 @@ def test_post_assessment_invalid_coordinates_returns_400(client):
 
 
 def test_post_assessment_valid_trd_response_format(client):
-    # Assessment with blank CSV sample data -> should produce insufficient_data
+    # Assessment with Niphad target from sample CSV (evaluates factors and returns TRD §7 format)
     payload = {
         "adaptation_id": "rain_garden",
         "reference_location": {"name": "Location A", "latitude": 19.10, "longitude": 73.00},

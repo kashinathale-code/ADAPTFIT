@@ -51,6 +51,32 @@ def clean_environmental_value(val: Any) -> Optional[float]:
         return None
 
 
+import re
+
+
+def _is_coarse_resolution(res: Any) -> bool:
+    """
+    Check whether a resolution string indicates coarse resolution.
+    Parses meters numerically so that '250 m' matches, but '1250 m' does not.
+    Also matches resolutions in kilometres or degrees.
+    """
+    if not res:
+        return False
+    res_str = str(res)
+    res_lower = res_str.lower()
+    if "km" in res_lower or "°" in res_lower or "deg" in res_lower:
+        return True
+    match = re.search(r"(?:~|\b)(\d+(?:\.\d+)?)\s*m\b", res_lower)
+    if match:
+        try:
+            val = float(match.group(1))
+            if val == 250.0:
+                return True
+        except (ValueError, TypeError):
+            pass
+    return False
+
+
 def generate_metadata_warnings(
     factors_metadata: Dict[str, Dict[str, Any]],
     location_label: str = "Location",
@@ -66,8 +92,8 @@ def generate_metadata_warnings(
         src = meta.get("source")
         factor_title = factor.replace("_", " ").title()
 
-        # Coarse resolution check (e.g., SoilGrids ~250m)
-        if res and ("250" in str(res) or "km" in str(res).lower()):
+        # Coarse resolution check (e.g., SoilGrids ~250m or km grid)
+        if _is_coarse_resolution(res):
             warnings.append(
                 f"{factor_title} data for {location_label} is {res} resolution; "
                 "verify on site."
@@ -80,3 +106,14 @@ def generate_metadata_warnings(
             )
 
     return warnings
+
+
+def generate_rainfall_grid_warning(src_a: Optional[str], src_b: Optional[str]) -> Optional[str]:
+    """
+    Generate explicit data quality warning when NASA POWER is used for both reference and target locations.
+    NASA POWER is a ~0.5 degree (~50 km) grid, so rainfall is regional context, not a site-level test.
+    """
+    if src_a and src_b and "NASA POWER" in src_a and "NASA POWER" in src_b:
+        return "NASA POWER is a ~0.5 degree (~50 km) grid, so rainfall is regional context, not a site-level test."
+    return None
+

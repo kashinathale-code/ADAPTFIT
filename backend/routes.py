@@ -29,6 +29,7 @@ from backend.data_fetcher import (
 from backend.data_processor import (
     clean_environmental_value,
     generate_metadata_warnings,
+    generate_rainfall_grid_warning,
     validate_coordinates,
 )
 from config import Config
@@ -372,12 +373,18 @@ def create_assessment():
     assessment_res = assess(requirements, profile_a, profile_b, cfg)
 
     # Collect and deduplicate data quality warnings (engine + source/resolution)
+    rainfall_grid_warning = generate_rainfall_grid_warning(
+        meta_a.get("annual_rainfall", {}).get("source"),
+        meta_b.get("annual_rainfall", {}).get("source"),
+    )
     src_res_warnings = (
         fetched_a["warnings"]
         + fetched_b["warnings"]
         + generate_metadata_warnings(meta_a, location_label=ref_name)
         + generate_metadata_warnings(meta_b, location_label=tgt_name)
     )
+    if rainfall_grid_warning:
+        src_res_warnings.append(rainfall_grid_warning)
     combined_warnings = list(
         dict.fromkeys(assessment_res.data_quality_warnings + src_res_warnings)
     )
@@ -632,6 +639,21 @@ def get_assessment(assessment_id: int):
         )
 
     from backend.compatibility_engine import DISCLAIMER
+
+    get_warnings = (
+        a_env.get("warnings", [])
+        + b_env.get("warnings", [])
+        + generate_metadata_warnings(a_env.get("metadata", {}), location_label=row["a_name"])
+        + generate_metadata_warnings(b_env.get("metadata", {}), location_label=row["b_name"])
+    )
+    get_rain_warn = generate_rainfall_grid_warning(
+        a_env.get("metadata", {}).get("annual_rainfall", {}).get("source"),
+        b_env.get("metadata", {}).get("annual_rainfall", {}).get("source"),
+    )
+    if get_rain_warn:
+        get_warnings.append(get_rain_warn)
+    deduped_warnings = list(dict.fromkeys(get_warnings))
+
     response_body = {
         "assessment_id": row["id"],
         "adaptation_id": row["adaptation_id"],
@@ -664,7 +686,7 @@ def get_assessment(assessment_id: int):
         "supporting_factors": supporting,
         "limiting_factors": limiting,
         "suggested_checks": [],
-        "data_quality_warnings": [],
+        "data_quality_warnings": deduped_warnings,
         "disclaimer": DISCLAIMER,
         "data_badge_label": build_data_badge_label(factors_payload),
         "created_at": row["created_at"],

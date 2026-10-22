@@ -99,3 +99,70 @@ def test_generate_metadata_warnings():
     warnings_str = " ".join(warnings).lower()
     assert "250 m" in warnings_str
     assert "illustrative" in warnings_str
+
+
+def test_generate_metadata_warnings_resolution_numerical():
+    # 250 m should trigger coarse resolution warning
+    meta_250 = {
+        "soil_infiltration": {"resolution": "250 m", "source": "SoilGrids"},
+    }
+    warn_250 = generate_metadata_warnings(meta_250, location_label="Site B")
+    assert any("250 m resolution" in w for w in warn_250)
+
+    # 1250 m should NOT trigger coarse resolution warning for 250 m
+    meta_1250 = {
+        "soil_infiltration": {"resolution": "1250 m", "source": "Local Survey"},
+    }
+    warn_1250 = generate_metadata_warnings(meta_1250, location_label="Site B")
+    assert not any("resolution" in w for w in warn_1250)
+
+    # ~250m should match
+    meta_tilde = {
+        "soil_infiltration": {"resolution": "~250m", "source": "SoilGrids"},
+    }
+    warn_tilde = generate_metadata_warnings(meta_tilde, location_label="Site B")
+    assert any("~250m resolution" in w for w in warn_tilde)
+
+    # 50 km should match coarse resolution check
+    meta_km = {
+        "annual_rainfall": {"resolution": "50 km", "source": "NASA POWER"},
+    }
+    warn_km = generate_metadata_warnings(meta_km, location_label="Site B")
+    assert any("50 km resolution" in w for w in warn_km)
+
+
+def test_generate_rainfall_grid_warning():
+    from backend.data_processor import generate_rainfall_grid_warning
+
+    # Both reference and target use NASA POWER
+    warn = generate_rainfall_grid_warning("NASA POWER (POWER API)", "NASA POWER (POWER API)")
+    assert warn is not None
+    assert "~0.5 degree (~50 km) grid" in warn
+    assert "regional context" in warn
+
+    # Only one uses NASA POWER
+    warn_single = generate_rainfall_grid_warning("NASA POWER (POWER API)", "Sample CSV")
+    assert warn_single is None
+
+    # Neither uses NASA POWER
+    warn_none = generate_rainfall_grid_warning("Sample CSV", "Demo")
+    assert warn_none is None
+
+
+def test_gis_processor_slope():
+    from backend.gis_processor import calculate_slope_from_elevations, get_slope_sampling_offsets
+
+    # Flat ground: center=100, north=100, south=100, east=100, west=100 -> 0.0%
+    slope_flat = calculate_slope_from_elevations(100.0, 100.0, 100.0, 100.0, 100.0, distance_m=100.0)
+    assert slope_flat == 0.0
+
+    # East-West slope: east=110, west=90 (delta=20m across 200m -> 10% slope)
+    slope_east = calculate_slope_from_elevations(100.0, 100.0, 100.0, 110.0, 90.0, distance_m=100.0)
+    assert slope_east == 10.0
+
+    # Sampling offsets
+    lats, lons = get_slope_sampling_offsets(18.52, 73.85, distance_m=100.0)
+    assert len(lats) == 5
+    assert len(lons) == 5
+    assert lats[0] == 18.52
+    assert lons[0] == 73.85
