@@ -292,13 +292,23 @@ function renderFactorsTable(factors) {
     const displayRes = isSpecialB ? resB : (isSpecialA ? resA : (f.resolution || "n/a (demo)"));
     const prov = `<div class="table-prov-text">Source: ${escapeHtml(displaySrc)} &bull; Res: ${escapeHtml(displayRes)}</div>`;
 
+    const evidenceHtml = f.evidence
+      ? `<div class="table-evidence-text" style="margin-top: 5px; font-size: 0.75rem; color: #64748b; line-height: 1.35;">
+           <span class="evidence-tag" style="display:inline-block; font-size: 0.68rem; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: ${f.rule_version && f.rule_version.includes('verified') ? '#e0f2fe; color: #0369a1' : '#fef3c7; color: #92400e'}; margin-bottom: 3px;">
+             ${escapeHtml(f.rule_version || 'candidate')}
+           </span>
+           <div>${escapeHtml(f.evidence)}</div>
+         </div>`
+      : "";
+
     const row = document.createElement("tr");
     row.innerHTML = `
       <td><strong>${label}</strong></td>
       <td class="col-center">${valA}</td>
       <td class="col-center">${valB}</td>
       <td>
-        <span>${escapeHtml(f.requirement || '')}</span>
+        <div style="font-weight: 600;">${escapeHtml(f.requirement || '')}</div>
+        ${evidenceHtml}
       </td>
       <td class="col-center">
         ${statusBadge}

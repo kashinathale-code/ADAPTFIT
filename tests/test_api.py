@@ -346,3 +346,54 @@ def test_config_wiring_max_missing_weight_changes_status(tmp_path):
         assert data["max_missing_weight"] == 0.05
 
 
+def test_assessment_evidence_and_rule_version(client):
+    # 1. Check GET /api/adaptations
+    res_adapt = client.get("/api/adaptations")
+    assert res_adapt.status_code == 200
+    adapt_data = res_adapt.get_json()
+    assert isinstance(adapt_data, list)
+    rg = next(a for a in adapt_data if a["id"] == "rain_garden")
+    for req in rg["requirements"]:
+        assert "evidence" in req
+        assert "rule_version" in req
+        assert req["evidence"] != ""
+        assert req["rule_version"] != ""
+
+    # Check that soil_infiltration has verified evidence citation
+    soil_req = next(r for r in rg["requirements"] if r["factor"] == "soil_infiltration")
+    assert "v1.0-verified" in soil_req["rule_version"]
+    assert "EPA" in soil_req["evidence"]
+
+    # Check that annual_rainfall is candidate, unverified
+    rain_req = next(r for r in rg["requirements"] if r["factor"] == "annual_rainfall")
+    assert "candidate" in rain_req["rule_version"]
+    assert "candidate, unverified" in rain_req["evidence"]
+
+    # 2. Check POST /api/assessments
+    payload = {
+        "adaptation_id": "rain_garden",
+        "reference_location": {"name": "Location A", "latitude": 19.10, "longitude": 73.00},
+        "target_location": {"name": "Niphad, Nashik", "latitude": 20.08, "longitude": 74.11},
+    }
+    res_post = client.post("/api/assessments", json=payload)
+    assert res_post.status_code == 201
+    post_data = res_post.get_json()
+    for factor in post_data["factors"]:
+        assert "evidence" in factor
+        assert "rule_version" in factor
+        assert factor["evidence"] != ""
+        assert factor["rule_version"] != ""
+
+    # 3. Check GET /api/assessments/<id>
+    assessment_id = post_data["assessment_id"]
+    res_get = client.get(f"/api/assessments/{assessment_id}")
+    assert res_get.status_code == 200
+    get_data = res_get.get_json()
+    for factor in get_data["factors"]:
+        assert "evidence" in factor
+        assert "rule_version" in factor
+        assert factor["evidence"] != ""
+        assert factor["rule_version"] != ""
+
+
+

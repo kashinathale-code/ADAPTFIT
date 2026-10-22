@@ -67,6 +67,8 @@ class FactorResult:
     transfer_risk: bool            # True when |B − A| exceeds tolerance
     interpretation: str            # plain-language sentence for the UI
     normalised_score: Optional[float]  # s_i in [0, 1], or None when unknown
+    evidence: str = ""             # authoritative engineering literature citation or candidate note
+    rule_version: str = ""         # e.g., "v1.0-verified" or "v0.1-candidate"
 
 
 @dataclass
@@ -328,6 +330,8 @@ def assess(
                 transfer_risk=risk,
                 interpretation=interpretation,
                 normalised_score=s_i,
+                evidence=req.evidence,
+                rule_version=req.rule_version,
             )
         )
 

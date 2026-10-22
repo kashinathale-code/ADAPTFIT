@@ -452,6 +452,8 @@ def create_assessment():
                 "a_resolution": a_meta_item.get("resolution") or "n/a (demo)",
                 "b_source": b_meta.get("source") or "Demo value",
                 "b_resolution": b_meta.get("resolution") or "n/a (demo)",
+                "evidence": fr.evidence,
+                "rule_version": fr.rule_version,
             }
         )
 
@@ -560,7 +562,8 @@ def get_assessment(assessment_id: int):
     # Also load requirement summaries from adaptation_requirements
     cur.execute(
         """
-        SELECT factor, min_value, max_value, unit, is_critical, transfer_tolerance, tolerance_type
+        SELECT factor, min_value, max_value, unit, is_critical, transfer_tolerance,
+               tolerance_type, evidence, rule_version
         FROM adaptation_requirements
         WHERE adaptation_id = ?
         """,
@@ -635,6 +638,8 @@ def get_assessment(assessment_id: int):
                 "a_resolution": a_meta.get("resolution") or "n/a (demo)",
                 "b_source": b_meta.get("source") or "Demo value",
                 "b_resolution": b_meta.get("resolution") or "n/a (demo)",
+                "evidence": req_meta["evidence"] if req_meta and req_meta["evidence"] else "",
+                "rule_version": req_meta["rule_version"] if req_meta and req_meta["rule_version"] else "",
             }
         )
 

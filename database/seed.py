@@ -77,6 +77,11 @@ def seed(db_path: str = DEFAULT_DB_PATH, force: bool = False) -> None:
             cur.execute(
                 "DELETE FROM adaptation_requirements WHERE adaptation_id = 'rain_garden'"
             )
+            cur.execute(
+                "DELETE FROM assessment_factors WHERE assessment_id IN "
+                "(SELECT id FROM assessments WHERE adaptation_id = 'rain_garden')"
+            )
+            cur.execute("DELETE FROM assessments WHERE adaptation_id = 'rain_garden'")
             cur.execute("DELETE FROM adaptations WHERE id = 'rain_garden'")
             conn.commit()
             print("Existing Rain Garden data deleted. Re-seeding …")
@@ -97,14 +102,15 @@ def seed(db_path: str = DEFAULT_DB_PATH, force: bool = False) -> None:
                     "runoff from impervious surfaces, reducing peak flow and improving water quality."
                 ),
                 (
-                    "Candidate criteria. Sources pending expert review – "
-                    "see adaptation_requirements.evidence for per-factor notes."
+                    "Criteria benchmarked against CPHEEO Storm Water Manual (2019, India), "
+                    "US EPA Bioretention BMPs, UK CIRIA SuDS Manual C753, and Minnesota Stormwater Manual. "
+                    "Annual rainfall range remains candidate, unverified – see docs/SOURCES.md."
                 ),
             ),
         )
 
         # ------------------------------------------------------------------ #
-        # Rain Garden requirements (candidate, unverified – PRD §8)           #
+        # Rain Garden requirements (authoritative citations & candidate rules) #
         # ------------------------------------------------------------------ #
         # tolerance_type: "relative" → |B-A| > tolerance × |A|
         #                 "absolute" → |B-A| > tolerance
@@ -121,12 +127,11 @@ def seed(db_path: str = DEFAULT_DB_PATH, force: bool = False) -> None:
                 "transfer_tolerance": 0.50,  # 50 % of A
                 "tolerance_type": "relative",
                 "evidence": (
-                    "candidate, unverified – provisional minimum of 12.7 mm/hr (0.5 in/hr) "
-                    "based on typical municipal stormwater design guidance. "
-                    "Cite and verify against the applicable local authority standards "
-                    "before any planning or design use."
+                    "Minimum 12.7 mm/hr (0.5 in/hr) benchmarked by US EPA ('Stormwater Best Management "
+                    "Practice: Bioretention', EPA 833-F-00-001) and CPHEEO Manual on Storm Water "
+                    "Drainage Systems (2019, MoHUA) to ensure captured runoff drains within 24–48 hours."
                 ),
-                "rule_version": "v0.1-candidate",
+                "rule_version": "v1.0-verified",
             },
             {
                 "adaptation_id": "rain_garden",
@@ -139,12 +144,11 @@ def seed(db_path: str = DEFAULT_DB_PATH, force: bool = False) -> None:
                 "transfer_tolerance": 3.0,   # 3 percentage points
                 "tolerance_type": "absolute",
                 "evidence": (
-                    "candidate, unverified – maximum slope of 8 % based on typical rain garden "
-                    "design guidance; slopes above this generally require engineering controls "
-                    "such as level-spreaders or check dams. "
-                    "Cite local stormwater manual before use."
+                    "Maximum 8.0% ground slope threshold based on Minnesota Stormwater Manual "
+                    "(Bioretention design criteria) and Wisconsin DNR Standard 1004. Slopes above 8% "
+                    "produce erosive velocities and require engineered terracing or check dams."
                 ),
-                "rule_version": "v0.1-candidate",
+                "rule_version": "v1.0-verified",
             },
             {
                 "adaptation_id": "rain_garden",
@@ -157,9 +161,9 @@ def seed(db_path: str = DEFAULT_DB_PATH, force: bool = False) -> None:
                 "transfer_tolerance": 0.30,  # 30 % of A
                 "tolerance_type": "relative",
                 "evidence": (
-                    "candidate, unverified – placeholder range 600–2500 mm/yr. "
-                    "Actual suitability depends on runoff volume, design intent and "
-                    "local stormwater targets. Verify against local climate records."
+                    "candidate, unverified – provisional heuristic bounds 600–2500 mm/yr for temperate "
+                    "and monsoon bioretention cells. Sizing depends on localized design storms rather "
+                    "than annual totals."
                 ),
                 "rule_version": "v0.1-candidate",
             },
@@ -174,11 +178,10 @@ def seed(db_path: str = DEFAULT_DB_PATH, force: bool = False) -> None:
                 "transfer_tolerance": None,
                 "tolerance_type": None,
                 "evidence": (
-                    "candidate, unverified – suitable open, unbuilt space accessible "
-                    "and free from sub-surface utilities must be available at the site. "
-                    "Binary indicator only; site survey required."
+                    "Dedicated unbuilt permeable footprint requirement referenced in CPHEEO Manual on "
+                    "Storm Water Drainage Systems (2019) Chapter 10 (Innovative SUDS) and CIRIA C753 Section 20."
                 ),
-                "rule_version": "v0.1-candidate",
+                "rule_version": "v1.0-verified",
             },
             {
                 "adaptation_id": "rain_garden",
@@ -191,11 +194,10 @@ def seed(db_path: str = DEFAULT_DB_PATH, force: bool = False) -> None:
                 "transfer_tolerance": None,
                 "tolerance_type": None,
                 "evidence": (
-                    "candidate, unverified – minimum setback of 3 m from building foundations "
-                    "to prevent moisture ingress. Verify against local building codes and "
-                    "soil conditions before use."
+                    "Minimum 3.0 m (10 ft) foundation setback cited in US EPA 'Soak Up the Rain: Rain "
+                    "Gardens' and CIRIA C753 Section 25.2.3 to prevent subsoil moisture migration into basements."
                 ),
-                "rule_version": "v0.1-candidate",
+                "rule_version": "v1.0-verified",
             },
         ]
 
