@@ -134,6 +134,98 @@ def infiltration_from_texture(texture_class: str) -> Optional[float]:
     return None
 
 
+def classify_usda_texture(sand: float, silt: float, clay: float) -> Optional[str]:
+    """
+    Classify soil texture into one of the 12 USDA texture classes based on
+    sand, silt, and clay percentages according to the USDA Soil Survey Manual
+    (Handbook No. 18, Chapter 3).
+
+    Returns lowercase class name (e.g. 'loam', 'clay loam') matching RAWLS_1983_KS_TABLE,
+    or None if input values are invalid.
+    """
+    if sand is None or silt is None or clay is None:
+        return None
+    try:
+        tot = float(sand) + float(silt) + float(clay)
+    except (ValueError, TypeError):
+        return None
+    if tot <= 0:
+        return None
+    s = (float(sand) / tot) * 100.0
+    si = (float(silt) / tot) * 100.0
+    c = (float(clay) / tot) * 100.0
+
+    if c >= 40:
+        if si >= 40:
+            return "silty clay"
+        elif s >= 45:
+            return "sandy clay"
+        else:
+            return "clay"
+    elif c >= 35:
+        if s >= 45:
+            return "sandy clay"
+        elif s <= 20 or si >= 40:
+            return "silty clay loam"
+        elif s <= 45:
+            return "clay loam"
+        else:
+            return "sandy clay loam"
+    elif c >= 27:
+        if s <= 20:
+            return "silty clay loam"
+        elif s <= 45:
+            return "clay loam"
+        else:
+            return "sandy clay loam"
+    elif c >= 20:
+        if s >= 45 and si < 28:
+            return "sandy clay loam"
+        elif si >= 50:
+            return "silt loam"
+        elif s <= 52 and si >= 28:
+            return "loam"
+        elif s > 52:
+            return "sandy loam"
+        else:
+            return "loam"
+    elif c >= 12:
+        if si >= 50:
+            return "silt loam"
+        elif s > 52 and (si + 2 * c >= 30):
+            return "sandy loam"
+        elif s <= 52 and si >= 28:
+            return "loam"
+        else:
+            return "sandy loam" if s > 52 else "loam"
+    elif c >= 7:
+        if si >= 80:
+            return "silt"
+        elif si >= 50:
+            return "silt loam"
+        elif s <= 52 and si >= 28:
+            return "loam"
+        elif si + 2 * c < 30:
+            if si + 1.5 * c < 15:
+                return "sand"
+            else:
+                return "loamy sand"
+        else:
+            return "sandy loam"
+    else:  # c < 7
+        if si >= 80:
+            return "silt"
+        elif si >= 50:
+            return "silt loam"
+        elif si + 2 * c < 30:
+            if si + 1.5 * c < 15:
+                return "sand"
+            else:
+                return "loamy sand"
+        else:
+            return "sandy loam"
+
+
 # OpenStreetMap Overpass API configuration
 # open_space: parks/greenery within 500 m radius (binary 1/0)
 # building_distance: nearest building centroid distance in metres (within 200 m)
@@ -742,34 +834,77 @@ def fetch_soilgrids_infiltration(
             None,
         )
 
-    # 2. Call SoilGrids REST API for TEXCLSS property
-    params = {
-        "lon": lon,
-        "lat": lat,
-        "property": "TEXCLSS",
-        "depth": "0-30cm",
-        "value": "mean",
-    }
+    # 2. Call SoilGrids REST API for sand, clay, silt properties at 5-15cm depth
+    params = [
+        ("lon", lon),
+        ("lat", lat),
+        ("property", "sand"),
+        ("property", "clay"),
+        ("property", "silt"),
+        ("depth", "5-15cm"),
+        ("value", "mean"),
+    ]
     try:
         resp = _request_with_retry("GET", SOILGRIDS_PROPERTIES_URL, params=params, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
 
-        # Navigate: properties.layers[0].depths[0].values.mean
         layers = data.get("properties", {}).get("layers", [])
-        texture_class: Optional[str] = None
-        for layer in layers:
-            if layer.get("name") == "TEXCLSS":
-                depths = layer.get("depths", [])
-                if depths:
-                    mean_val = depths[0].get("values", {}).get("mean")
-                    if isinstance(mean_val, str):
-                        texture_class = mean_val
-                    elif isinstance(mean_val, (int, float)):
-                        label = depths[0].get("label")
-                        texture_class = label if isinstance(label, str) else None
-                break
+        layer_map = {}
+        for l in layers:
+            if isinstance(l, dict) and l.get("name"):
+                layer_map[l["name"].lower()] = l
 
+        fractions: Dict[str, Optional[float]] = {}
+        for prop in ("sand", "clay", "silt"):
+            layer = layer_map.get(prop)
+            if not layer:
+                fractions[prop] = None
+                continue
+            dfactor = float(layer.get("unit_measure", {}).get("d_factor") or 10.0)
+            depths = layer.get("depths", [])
+            depth_entry = next((d for d in depths if d.get("label") == "5-15cm"), (depths[0] if depths else None))
+            if depth_entry:
+                val = depth_entry.get("values", {}).get("mean")
+                if val is not None and isinstance(val, (int, float)):
+                    fractions[prop] = float(val) / dfactor
+                else:
+                    fractions[prop] = None
+            else:
+                fractions[prop] = None
+
+        if any(fractions.get(p) is None for p in ("sand", "clay", "silt")):
+            snapshot = get_saved_snapshot("soil_infiltration", lat, lon, name, snapshots_path)
+            if snapshot is not None:
+                snap_val = snapshot.get("value")
+                snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
+                snap_res = snapshot.get("resolution") or SOILGRIDS_RESOLUTION
+                snap_trans = snapshot.get("transformation") or "Retrieved from cached live snapshot"
+                now_iso = datetime.now(timezone.utc).isoformat()
+                source_label = f"Live (cached snapshot, {snap_date})"
+                meta = {
+                    "unit": "mm/hr",
+                    "source": source_label,
+                    "resolution": snap_res,
+                    "data_date": snap_date,
+                    "retrieved_at": now_iso,
+                    "transformation": snap_trans,
+                }
+                return (
+                    snap_val,
+                    meta,
+                    f"Live soil data from SoilGrids returned no sand/clay/silt values at 5-15cm depth; used saved snapshot from {snap_date}.",
+                )
+            return (
+                None,
+                None,
+                "Live soil data from SoilGrids was unmeasured at coordinates; fell back to demo/sample data.",
+            )
+
+        sand_pct = fractions["sand"]
+        clay_pct = fractions["clay"]
+        silt_pct = fractions["silt"]
+        texture_class = classify_usda_texture(sand_pct, silt_pct, clay_pct)
         if not texture_class:
             snapshot = get_saved_snapshot("soil_infiltration", lat, lon, name, snapshots_path)
             if snapshot is not None:
@@ -790,13 +925,12 @@ def fetch_soilgrids_infiltration(
                 return (
                     snap_val,
                     meta,
-                    f"Live soil data from SoilGrids returned no texture class; used saved snapshot from {snap_date}.",
+                    f"SoilGrids fractions could not be classified into USDA texture; used saved snapshot from {snap_date}.",
                 )
             return (
                 None,
                 None,
-                "Live soil data from SoilGrids was unavailable or returned no texture class; "
-                "fell back to demo/sample data.",
+                "SoilGrids fractions could not be classified into USDA texture; fell back to demo/sample data.",
             )
 
         ks = infiltration_from_texture(texture_class)
@@ -831,7 +965,8 @@ def fetch_soilgrids_infiltration(
 
         now_iso = datetime.now(timezone.utc).isoformat()
         transformation = (
-            f"Texture class '{texture_class}' from SoilGrids TEXCLSS (0-30 cm mean) → "
+            f"SoilGrids 5-15cm (sand={sand_pct:.1f}%, silt={silt_pct:.1f}%, clay={clay_pct:.1f}%) → "
+            f"USDA texture '{texture_class.title()}' → "
             f"Ks = {ks} mm/hr via Rawls et al. (1983) Table 1 "
             "[DOI: 10.1061/(ASCE)0733-9429(1983)109:1(62)]"
         )
@@ -947,11 +1082,14 @@ def fetch_osm_open_space(
 
     for mirror_url in OVERPASS_MIRRORS:
         try:
+            req_timeout = (5.0, float(timeout)) if isinstance(timeout, (int, float)) else (5.0, 5.0)
             resp = _request_with_retry(
                 "POST",
                 mirror_url,
                 data={"data": overpass_query},
-                timeout=timeout,
+                retries=1,
+                connect_timeout=5.0,
+                timeout=req_timeout,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -1089,11 +1227,14 @@ def fetch_osm_building_distance(
 
     for mirror_url in OVERPASS_MIRRORS:
         try:
+            req_timeout = (5.0, float(timeout)) if isinstance(timeout, (int, float)) else (5.0, 5.0)
             resp = _request_with_retry(
                 "POST",
                 mirror_url,
                 data={"data": overpass_query},
-                timeout=timeout,
+                retries=1,
+                connect_timeout=5.0,
+                timeout=req_timeout,
             )
             resp.raise_for_status()
             data = resp.json()

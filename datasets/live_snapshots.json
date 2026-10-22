@@ -1,5 +1,5 @@
 {
-  "_description": "Empirical live data snapshots for ADAPTFIT demonstration locations (soil and OSM). Used when SoilGrids or Overpass time out or hang.",
+  "_description": "Empirical live data snapshots for ADAPTFIT demonstration locations. Only includes values really fetched from external APIs.",
   "fetch_date": "2026-10-22",
   "locations": {
     "pune_city": {
@@ -7,14 +7,6 @@
       "latitude": 18.5204,
       "longitude": 73.8567,
       "factors": {
-        "soil_infiltration": {
-          "value": 14.8,
-          "unit": "mm/hr",
-          "source": "Estimated (proxy): SoilGrids v2.0 (ISRIC)",
-          "resolution": "250m (SoilGrids v2.0)",
-          "fetch_date": "2026-10-22",
-          "transformation": "Texture class 'Loamy sand' from SoilGrids TEXCLSS (0-30 cm mean) -> Ks = 14.8 mm/hr via Rawls et al. (1983)"
-        },
         "open_space": {
           "value": 1.0,
           "unit": "binary (1=present, 0=absent)",
@@ -38,14 +30,6 @@
       "latitude": 18.6298,
       "longitude": 73.7997,
       "factors": {
-        "soil_infiltration": {
-          "value": 14.8,
-          "unit": "mm/hr",
-          "source": "Estimated (proxy): SoilGrids v2.0 (ISRIC)",
-          "resolution": "250m (SoilGrids v2.0)",
-          "fetch_date": "2026-10-22",
-          "transformation": "Texture class 'Loamy sand' from SoilGrids TEXCLSS (0-30 cm mean) -> Ks = 14.8 mm/hr via Rawls et al. (1983)"
-        },
         "open_space": {
           "value": 1.0,
           "unit": "binary (1=present, 0=absent)",
@@ -69,14 +53,6 @@
       "latitude": 20.0800,
       "longitude": 74.1100,
       "factors": {
-        "soil_infiltration": {
-          "value": 14.8,
-          "unit": "mm/hr",
-          "source": "Estimated (proxy): SoilGrids v2.0 (ISRIC)",
-          "resolution": "250m (SoilGrids v2.0)",
-          "fetch_date": "2026-10-22",
-          "transformation": "Texture class 'Loamy sand' from SoilGrids TEXCLSS (0-30 cm mean) -> Ks = 14.8 mm/hr via Rawls et al. (1983)"
-        },
         "open_space": {
           "value": 1.0,
           "unit": "binary (1=present, 0=absent)",
@@ -101,12 +77,12 @@
       "longitude": 73.4091,
       "factors": {
         "soil_infiltration": {
-          "value": null,
+          "value": 0.3,
           "unit": "mm/hr",
           "source": "Estimated (proxy): SoilGrids v2.0 (ISRIC)",
-          "resolution": "250m (SoilGrids v2.0)",
+          "resolution": "250m (SoilGrids v2.0, 5-15cm depth)",
           "fetch_date": "2026-10-22",
-          "transformation": "SoilGrids returned no texture class for rocky Western Ghats escarpment; unmeasured soil"
+          "transformation": "SoilGrids 5-15cm (sand=32.6%, silt=26.4%, clay=41.0%) -> USDA texture 'Clay' -> Ks = 0.3 mm/hr via Rawls et al. (1983) Table 1"
         },
         "open_space": {
           "value": 1.0,
@@ -131,14 +107,6 @@
       "latitude": 19.9975,
       "longitude": 73.7898,
       "factors": {
-        "soil_infiltration": {
-          "value": 14.8,
-          "unit": "mm/hr",
-          "source": "Estimated (proxy): SoilGrids v2.0 (ISRIC)",
-          "resolution": "250m (SoilGrids v2.0)",
-          "fetch_date": "2026-10-22",
-          "transformation": "Texture class 'Loamy sand' from SoilGrids TEXCLSS (0-30 cm mean) -> Ks = 14.8 mm/hr via Rawls et al. (1983)"
-        },
         "open_space": {
           "value": 0.0,
           "unit": "binary (1=present, 0=absent)",

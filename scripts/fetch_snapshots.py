@@ -45,6 +45,7 @@ from backend.data_fetcher import (
     OVERPASS_MIRRORS,
     DEFAULT_CSV_PATH,
     DEFAULT_SNAPSHOTS_PATH,
+    classify_usda_texture,
     infiltration_from_texture,
     load_sample_locations,
 )
@@ -65,16 +66,19 @@ def fetch_soil_snapshot(
     retries: int = 2,
 ) -> Optional[Dict[str, Any]]:
     """
-    Fetch USDA texture class from SoilGrids v2.0 REST API and estimate Ks (mm/hr)
-    using the Rawls et al. (1983) lookup table.
+    Fetch sand, clay, and silt percentages from SoilGrids v2.0 REST API at 5-15cm depth,
+    divide raw means by d_factor (10), determine USDA texture class, and estimate
+    Ks (mm/hr) using the Rawls et al. (1983) lookup table.
     """
-    params = {
-        "lon": lon,
-        "lat": lat,
-        "property": "TEXCLSS",
-        "depth": "0-30cm",
-        "value": "mean",
-    }
+    params = [
+        ("lon", lon),
+        ("lat", lat),
+        ("property", "sand"),
+        ("property", "clay"),
+        ("property", "silt"),
+        ("depth", "5-15cm"),
+        ("value", "mean"),
+    ]
     headers = _get_headers()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -93,35 +97,46 @@ def fetch_soil_snapshot(
             data = resp.json()
 
             layers = data.get("properties", {}).get("layers", [])
-            texture_class: Optional[str] = None
-            for layer in layers:
-                if layer.get("name") == "TEXCLSS":
-                    depths = layer.get("depths", [])
-                    if depths:
-                        mean_val = depths[0].get("values", {}).get("mean")
-                        if isinstance(mean_val, str):
-                            texture_class = mean_val
-                        elif isinstance(mean_val, (int, float)):
-                            label = depths[0].get("label")
-                            texture_class = label if isinstance(label, str) else None
-                    break
+            layer_map = {l["name"].lower(): l for l in layers if isinstance(l, dict) and l.get("name")}
 
-            if not texture_class:
+            fractions: Dict[str, Optional[float]] = {}
+            for prop in ("sand", "clay", "silt"):
+                layer = layer_map.get(prop)
+                if not layer:
+                    fractions[prop] = None
+                    continue
+                dfactor = float(layer.get("unit_measure", {}).get("d_factor") or 10.0)
+                depths = layer.get("depths", [])
+                depth_entry = next((d for d in depths if d.get("label") == "5-15cm"), (depths[0] if depths else None))
+                if depth_entry:
+                    val = depth_entry.get("values", {}).get("mean")
+                    if val is not None and isinstance(val, (int, float)):
+                        fractions[prop] = float(val) / dfactor
+                    else:
+                        fractions[prop] = None
+                else:
+                    fractions[prop] = None
+
+            if any(fractions.get(p) is None for p in ("sand", "clay", "silt")):
                 return {
                     "value": None,
                     "unit": "mm/hr",
                     "source": SOILGRIDS_SOURCE,
                     "resolution": SOILGRIDS_RESOLUTION,
                     "fetch_date": today_str,
-                    "transformation": "SoilGrids returned no texture class or rocky terrain (unmeasured)",
+                    "transformation": "SoilGrids returned no sand/clay/silt values at 5-15cm depth (unmeasured or urban sealed surface)",
                 }
 
-            ks = infiltration_from_texture(texture_class)
+            sand_pct = fractions["sand"]
+            clay_pct = fractions["clay"]
+            silt_pct = fractions["silt"]
+            texture_class = classify_usda_texture(sand_pct, silt_pct, clay_pct)
+            ks = infiltration_from_texture(texture_class) if texture_class else None
             trans = (
-                f"Texture class '{texture_class}' from SoilGrids TEXCLSS (0-30 cm mean) -> "
-                f"Ks = {ks} mm/hr via Rawls et al. (1983) Table 1"
+                f"SoilGrids 5-15cm (sand={sand_pct:.1f}%, silt={silt_pct:.1f}%, clay={clay_pct:.1f}%) -> "
+                f"USDA texture '{texture_class.title()}' -> Ks = {ks} mm/hr via Rawls et al. (1983) Table 1"
                 if ks is not None
-                else f"Texture class '{texture_class}' not in Rawls et al. (1983) lookup table"
+                else f"SoilGrids 5-15cm fractions could not be mapped to Rawls et al. (1983) lookup table"
             )
             return {
                 "value": ks,
@@ -143,7 +158,7 @@ def fetch_osm_open_space_snapshot(
     lat: float,
     lon: float,
     timeout: float = 5.0,
-    retries: int = 2,
+    retries: int = 1,
 ) -> Optional[Dict[str, Any]]:
     """Query OSM Overpass mirrors in order for parks/greenery within 500 m."""
     query = (
@@ -198,7 +213,7 @@ def fetch_osm_building_distance_snapshot(
     lat: float,
     lon: float,
     timeout: float = 5.0,
-    retries: int = 2,
+    retries: int = 1,
 ) -> Optional[Dict[str, Any]]:
     """Query OSM Overpass mirrors in order for buildings within 200 m and compute nearest centroid."""
     query = (
@@ -262,7 +277,7 @@ def fetch_all_snapshots(
     csv_path: Optional[str] = None,
     output_path: Optional[str] = None,
     timeout: float = 5.0,
-    retries: int = 2,
+    retries: int = 1,
     force: bool = False,
 ) -> Dict[str, Any]:
     """

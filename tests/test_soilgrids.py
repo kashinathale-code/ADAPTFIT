@@ -21,6 +21,7 @@ from backend.data_fetcher import (
     SOILGRIDS_RESOLUTION,
     DEMO_SOURCE,
     RAWLS_1983_KS_TABLE,
+    classify_usda_texture,
     infiltration_from_texture,
     fetch_location_environmental_data,
     fetch_soilgrids_infiltration,
@@ -36,29 +37,52 @@ def test_db(tmp_path):
     return db_file
 
 
-def _mock_soilgrids_response(texture_class: str = "Loam"):
-    """Return a mock requests.Response with valid SoilGrids v2.0 TEXCLSS JSON."""
+def _mock_soilgrids_response(texture_class: str = "Loam", sand: float = None, clay: float = None, silt: float = None, d_factor: int = 10):
+    """Return a mock requests.Response with valid SoilGrids v2.0 sand, clay, silt JSON."""
+    defaults = {
+        "sand": (900, 50, 50),
+        "loamy sand": (800, 80, 120),
+        "sandy loam": (650, 150, 200),
+        "loam": (400, 200, 400),
+        "silt loam": (200, 150, 650),
+        "silt": (50, 100, 850),
+        "sandy clay loam": (550, 300, 150),
+        "clay loam": (300, 350, 350),
+        "silty clay loam": (100, 350, 550),
+        "sandy clay": (500, 400, 100),
+        "silty clay": (100, 450, 450),
+        "clay": (200, 600, 200),
+    }
+    key = texture_class.strip().lower()
+    if sand is None or clay is None or silt is None:
+        sand_raw, clay_raw, silt_raw = defaults.get(key, (400, 200, 400))
+    else:
+        sand_raw = int(sand * d_factor)
+        clay_raw = int(clay * d_factor)
+        silt_raw = int(silt * d_factor)
+
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
-        "type": "Point",
+        "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [73.8567, 18.5204]},
         "properties": {
             "layers": [
                 {
-                    "name": "TEXCLSS",
-                    "unit_measure": {"d_factor": 1, "mapped_units": "–", "target_units": "–"},
-                    "depths": [
-                        {
-                            "label": "0-30cm",
-                            "range": {"bottom_depth": 30, "top_depth": 0, "unit_depth": "cm"},
-                            "values": {
-                                "mean": texture_class,
-                                "uncertainty": None,
-                            },
-                        }
-                    ],
-                }
+                    "name": "sand",
+                    "unit_measure": {"d_factor": d_factor, "mapped_units": "cg/kg", "target_units": "g/kg"},
+                    "depths": [{"label": "5-15cm", "values": {"mean": sand_raw}}],
+                },
+                {
+                    "name": "clay",
+                    "unit_measure": {"d_factor": d_factor, "mapped_units": "cg/kg", "target_units": "g/kg"},
+                    "depths": [{"label": "5-15cm", "values": {"mean": clay_raw}}],
+                },
+                {
+                    "name": "silt",
+                    "unit_measure": {"d_factor": d_factor, "mapped_units": "cg/kg", "target_units": "g/kg"},
+                    "depths": [{"label": "5-15cm", "values": {"mean": silt_raw}}],
+                },
             ]
         },
     }
@@ -125,6 +149,54 @@ class TestRawlsLookupTable:
             assert cls in RAWLS_1983_KS_TABLE, f"Missing: {cls}"
 
 
+class TestUSDATextureClassification:
+    """Verify programmatic USDA texture classification from sand, silt, and clay percentages."""
+
+    def test_sand_classification(self):
+        assert classify_usda_texture(90.0, 5.0, 5.0) == "sand"
+
+    def test_loamy_sand_classification(self):
+        assert classify_usda_texture(82.0, 10.0, 8.0) == "loamy sand"
+
+    def test_sandy_loam_classification(self):
+        assert classify_usda_texture(65.0, 20.0, 15.0) == "sandy loam"
+
+    def test_loam_classification(self):
+        assert classify_usda_texture(40.0, 40.0, 20.0) == "loam"
+
+    def test_silt_loam_classification(self):
+        assert classify_usda_texture(20.0, 65.0, 15.0) == "silt loam"
+
+    def test_silt_classification(self):
+        assert classify_usda_texture(5.0, 85.0, 10.0) == "silt"
+
+    def test_sandy_clay_loam_classification(self):
+        assert classify_usda_texture(55.0, 15.0, 30.0) == "sandy clay loam"
+
+    def test_clay_loam_classification(self):
+        assert classify_usda_texture(30.0, 35.0, 35.0) == "clay loam"
+
+    def test_silty_clay_loam_classification(self):
+        assert classify_usda_texture(10.0, 55.0, 35.0) == "silty clay loam"
+
+    def test_sandy_clay_classification(self):
+        assert classify_usda_texture(50.0, 10.0, 40.0) == "sandy clay"
+
+    def test_silty_clay_classification(self):
+        assert classify_usda_texture(10.0, 45.0, 45.0) == "silty clay"
+
+    def test_clay_classification(self):
+        assert classify_usda_texture(20.0, 20.0, 60.0) == "clay"
+
+    def test_lonavala_soil_fractions(self):
+        # 32.6% sand, 26.4% silt, 41.0% clay -> clay
+        assert classify_usda_texture(32.6, 26.4, 41.0) == "clay"
+
+    def test_invalid_or_none_inputs(self):
+        assert classify_usda_texture(None, 20.0, 20.0) is None
+        assert classify_usda_texture(0.0, 0.0, 0.0) is None
+
+
 # ---------------------------------------------------------------------------
 # Integration tests — flag behaviour
 # ---------------------------------------------------------------------------
@@ -160,7 +232,14 @@ def test_live_soil_success_loam(test_db):
         assert mock_get.called
         args, kwargs = mock_get.call_args
         assert kwargs.get("timeout") in (10.0, (5.0, 10.0))
-        assert kwargs.get("params", {}).get("property") == "TEXCLSS"
+        params = kwargs.get("params", [])
+        if isinstance(params, list):
+            props = [v for k, v in params if k == "property"]
+            assert set(props) == {"sand", "clay", "silt"}
+            depths = [v for k, v in params if k == "depth"]
+            assert "5-15cm" in depths
+        elif isinstance(params, dict):
+            assert "sand" in params.get("property", [])
 
         assert res["values"]["soil_infiltration"] == 3.4
         meta = res["metadata"]["soil_infiltration"]
@@ -317,27 +396,28 @@ def test_stale_cache_refreshes(test_db):
 
 
 def test_timeout_fallback_to_csv_with_warning(test_db):
-    """On timeout, uses cached snapshot if present, else falls back to CSV value."""
+    """On timeout, uses cached snapshot if present (Lonavala), else falls back to CSV value (Pune)."""
     with patch("requests.get", side_effect=requests.exceptions.Timeout("timed out")):
-        res = fetch_location_environmental_data(
-            18.5204,
-            73.8567,
+        # Location with saved snapshot (Lonavala: 0.3 mm/hr)
+        res_snap = fetch_location_environmental_data(
+            18.7557,
+            73.4091,
+            name="Lonavala",
             use_live_soil=True,
             db_path=test_db,
         )
-        # Pune city has saved snapshot
-        assert res["values"]["soil_infiltration"] == 14.8
-        assert res["metadata"]["soil_infiltration"]["source"].startswith("Live (cached snapshot,")
-        assert any("SoilGrids" in w for w in res["warnings"])
-        assert res["live_soil_used"] is False
+        assert res_snap["values"]["soil_infiltration"] == 0.3
+        assert res_snap["metadata"]["soil_infiltration"]["source"].startswith("Live (cached snapshot,")
+        assert any("SoilGrids" in w for w in res_snap["warnings"])
+        assert res_snap["live_soil_used"] is False
 
-        # When no snapshot exists, falls back to CSV demo value
+        # Location without saved snapshot (Pune city: 22.0 mm/hr CSV demo)
         res_no_snap = fetch_location_environmental_data(
             18.5204,
             73.8567,
+            name="Pune city",
             use_live_soil=True,
             db_path=test_db,
-            snapshots_path="",
         )
         assert res_no_snap["values"]["soil_infiltration"] == 22.0
         assert res_no_snap["metadata"]["soil_infiltration"]["source"] == DEMO_SOURCE
@@ -361,32 +441,40 @@ def test_http_error_fallback_no_invented_value(test_db):
 
 
 def test_empty_texture_class_fallback(test_db):
-    """When SoilGrids returns no texture class string, falls back to saved snapshot or CSV."""
+    """When SoilGrids returns no valid numeric means, falls back to saved snapshot (if present) or CSV demo."""
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
-        "properties": {"layers": [{"name": "TEXCLSS", "depths": [{"values": {"mean": None}}]}]}
+        "properties": {
+            "layers": [
+                {"name": "sand", "depths": [{"label": "5-15cm", "values": {"mean": None}}]},
+                {"name": "clay", "depths": [{"label": "5-15cm", "values": {"mean": None}}]},
+                {"name": "silt", "depths": [{"label": "5-15cm", "values": {"mean": None}}]},
+            ]
+        }
     }
     mock_resp.raise_for_status = MagicMock()
     with patch("requests.get", return_value=mock_resp):
-        res = fetch_location_environmental_data(
-            18.5204,
-            73.8567,
+        # 1. Location with saved snapshot (Lonavala)
+        res_snap = fetch_location_environmental_data(
+            18.7557,
+            73.4091,
+            name="Lonavala",
             use_live_soil=True,
             db_path=test_db,
         )
-        assert res["values"]["soil_infiltration"] == 14.8
-        assert res["metadata"]["soil_infiltration"]["source"].startswith("Live (cached snapshot,")
-        assert any("SoilGrids" in w for w in res["warnings"])
-        assert res["live_soil_used"] is False
+        assert res_snap["values"]["soil_infiltration"] == 0.3
+        assert res_snap["metadata"]["soil_infiltration"]["source"].startswith("Live (cached snapshot,")
+        assert any("SoilGrids" in w for w in res_snap["warnings"])
+        assert res_snap["live_soil_used"] is False
 
-        # When no snapshot exists, falls back to CSV
+        # 2. Location without saved snapshot (Pune city) falls back to CSV demo value
         res_no_snap = fetch_location_environmental_data(
             18.5204,
             73.8567,
+            name="Pune city",
             use_live_soil=True,
             db_path=test_db,
-            snapshots_path="",
         )
         assert res_no_snap["values"]["soil_infiltration"] == 22.0
         assert res_no_snap["metadata"]["soil_infiltration"]["source"] == DEMO_SOURCE

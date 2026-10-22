@@ -129,21 +129,36 @@ def test_overpass_mirrors_tried_in_order(test_db):
 # --------------------------------------------------------------------------- #
 
 def test_soilgrids_failure_uses_cached_snapshot_with_label(test_db):
-    """When SoilGrids fails, saved snapshot is used and labeled 'Live (cached snapshot, <date>)'."""
+    """When SoilGrids fails for a location with a saved snapshot (Lonavala), saved snapshot is used."""
     with patch("requests.get", side_effect=requests.exceptions.ConnectTimeout("SoilGrids down")):
         val, meta, warn = fetch_soilgrids_infiltration(
-            lat=18.5204,
-            lon=73.8567,
-            name="Pune city",
+            lat=18.7557,
+            lon=73.4091,
+            name="Lonavala",
             db_path=test_db,
             staleness_hours=0,
         )
-        assert val == 14.8
+        assert val == 0.3
         assert meta is not None
         assert meta["source"].startswith("Live (cached snapshot,")
         assert meta["unit"] == "mm/hr"
-        assert meta["resolution"] == "250m (SoilGrids v2.0)"
+        assert "250m" in meta["resolution"]
         assert "used saved snapshot" in warn
+
+
+def test_soilgrids_failure_without_snapshot_stays_demo(test_db):
+    """When SoilGrids fails for a location without a saved snapshot (Pune), value stays Demo."""
+    with patch("requests.get", side_effect=requests.exceptions.ConnectTimeout("SoilGrids down")):
+        res = fetch_location_environmental_data(
+            lat=18.5204,
+            lon=73.8567,
+            name="Pune city",
+            use_live_soil=True,
+            db_path=test_db,
+        )
+        assert res["values"]["soil_infiltration"] == 22.0
+        assert res["metadata"]["soil_infiltration"]["source"] == DEMO_SOURCE
+        assert res["live_soil_used"] is False
 
 
 def test_osm_all_mirrors_failure_uses_cached_snapshot(test_db):
@@ -178,25 +193,16 @@ def test_osm_building_distance_failure_uses_cached_snapshot(test_db):
 
 
 # --------------------------------------------------------------------------- #
-# 4. Never invent values: Lonavala soil is NULL                                #
+# 4. Really fetched snapshots vs Demo values                                  #
 # --------------------------------------------------------------------------- #
 
-def test_lonavala_soil_remains_null_uninvented(test_db):
-    """Lonavala soil in snapshot is explicitly null and must never be invented."""
+def test_lonavala_soil_really_fetched_snapshot(test_db):
+    """Lonavala soil was really fetched as 0.3 mm/hr (Clay) from live SoilGrids."""
     snapshot = get_saved_snapshot("soil_infiltration", 18.7557, 73.4091, name="Lonavala")
     assert snapshot is not None
-    assert snapshot["value"] is None
-
-    with patch("requests.get", side_effect=requests.exceptions.ConnectTimeout("SoilGrids down")):
-        val, meta, warn = fetch_soilgrids_infiltration(
-            lat=18.7557,
-            lon=73.4091,
-            name="Lonavala",
-            db_path=test_db,
-            staleness_hours=0,
-        )
-        assert val is None
-        assert meta["source"].startswith("Live (cached snapshot,")
+    assert snapshot["value"] == 0.3
+    assert "Clay" in snapshot["transformation"]
+    assert "Estimated (proxy)" in snapshot["source"]
 
 
 # --------------------------------------------------------------------------- #
@@ -278,10 +284,9 @@ def test_fetch_snapshots_script_flow():
     soil_resp.json.return_value = {
         "properties": {
             "layers": [
-                {
-                    "name": "TEXCLSS",
-                    "depths": [{"values": {"mean": "Loam"}, "label": "Loam"}],
-                }
+                {"name": "sand", "unit_measure": {"d_factor": 10}, "depths": [{"label": "5-15cm", "values": {"mean": 400}}]},
+                {"name": "clay", "unit_measure": {"d_factor": 10}, "depths": [{"label": "5-15cm", "values": {"mean": 200}}]},
+                {"name": "silt", "unit_measure": {"d_factor": 10}, "depths": [{"label": "5-15cm", "values": {"mean": 400}}]},
             ]
         }
     }

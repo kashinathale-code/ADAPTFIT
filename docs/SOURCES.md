@@ -88,3 +88,40 @@ This document provides complete bibliographic references, regulatory citations, 
 | **Elevation & Topography** | Open-Meteo Elevation API (Copernicus DEM GLO-90) | 90 m grid | [https://open-meteo.com/en/docs/elevation-api](https://open-meteo.com/en/docs/elevation-api) |
 | **Soil Physical Properties** | ISRIC SoilGrids REST API | 250 m raster | [https://rest.isric.org/](https://rest.isric.org/) |
 | **Built Environment & Land Use** | OpenStreetMap (Overpass API) | Vector geometry (point / polygon) | [https://overpass-api.de/](https://overpass-api.de/) |
+
+---
+
+## 4. Soil Infiltration Estimation Methodology & Provenance
+
+### 4.1 Live Soil Query Parameters
+- **API Endpoint:** `https://rest.isric.org/soilgrids/v2.0/properties/query`
+- **Parameters:** `lon`, `lat`, `property=sand`, `property=clay`, `property=silt`, `depth=5-15cm`, `value=mean`.
+- **Scaling Factor:** Raw layer mean values are scaled by `d_factor` (10) to obtain particle size weight percentages ($\text{sand}\%$, $\text{silt}\%$, $\text{clay}\%$).
+
+### 4.2 USDA Soil Texture Classification
+Percentages are classified into one of the 12 USDA Soil Texture classes according to the *USDA Soil Survey Manual*, Agriculture Handbook No. 18 (Chapter 3: Examination and Description of Soils).
+- Citation: Soil Survey Staff (2017). *Soil Survey Manual*, USDA Handbook 18, Government Printing Office, Washington, D.C. URL: [https://www.nrcs.usda.gov/resources/guides-and-instructions/soil-survey-manual](https://www.nrcs.usda.gov/resources/guides-and-instructions/soil-survey-manual)
+
+### 4.3 Infiltration Conversion Table (Rawls et al., 1983)
+The USDA texture class is translated to saturated hydraulic conductivity ($K_s$, mm/hr) using the Green-Ampt parameter table:
+- Citation: Rawls, W.J., Brakensiek, D.L., & Miller, N. (1983). *"Green-Ampt infiltration parameters from soil data."* Journal of Hydraulic Engineering, 109(1), 62–70. DOI: [10.1061/(ASCE)0733-9429(1983)109:1(62)](https://doi.org/10.1061/(ASCE)0733-9429(1983)109:1(62))
+
+| USDA Texture Class | Rawls et al. (1983) $K_s$ (mm/hr) | ADAPTFIT Rule Interpretation |
+| :--- | :--- | :--- |
+| **Sand** | 117.8 | Exceeds minimum (12.7 mm/hr); suitable infiltration |
+| **Loamy sand** | 29.9 | Exceeds minimum (12.7 mm/hr); suitable infiltration |
+| **Sandy loam** | 10.9 | Marginally below 12.7 mm/hr; conditional verification |
+| **Silt loam** | 6.5 | Below 12.7 mm/hr; requires underdrain or soil amendment |
+| **Silt** | 6.5 | Below 12.7 mm/hr; requires underdrain or amendment |
+| **Loam** | 3.4 | Below 12.7 mm/hr; requires underdrain or amendment |
+| **Sandy clay loam** | 1.5 | Unsuitable for unlined infiltration without underdrain |
+| **Clay loam** | 1.0 | Unsuitable for unlined infiltration without underdrain |
+| **Silty clay loam** | 1.0 | Unsuitable for unlined infiltration without underdrain |
+| **Sandy clay** | 0.6 | Critical blocker for unlined infiltration |
+| **Silty clay** | 0.5 | Critical blocker for unlined infiltration |
+| **Clay** | 0.3 | Critical blocker for unlined infiltration |
+
+### 4.4 Mandatory Provenance Labeling
+- **Provenance Label:** **`Estimated (proxy)`**, never measured.
+- **Rule:** Regional digital soil maps reflect 250 m predictive models rather than localized borehole or double-ring infiltrometer field tests. In ADAPTFIT, all SoilGrids-derived infiltration rates are strictly labeled `Estimated (proxy): SoilGrids v2.0 (ISRIC)` to maintain transparent scientific provenance.
+
