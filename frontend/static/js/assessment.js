@@ -558,3 +558,56 @@ async function submitAssessment() {
     btnText.textContent = "Run assessment";
   }
 }
+
+/**
+ * Geocoding with Nominatim (FR-3)
+ */
+async function searchPlace(type) {
+  const inputEl = document.getElementById(`loc${type}_search`);
+  const resultsEl = document.getElementById(`loc${type}_search_results`);
+  if (!inputEl || !resultsEl) return;
+
+  const query = inputEl.value.trim();
+  if (!query) return;
+
+  resultsEl.style.display = "block";
+  resultsEl.innerHTML = `<div style="padding: 10px; color: #64748b; font-size: 0.85rem;">Searching Nominatim for "${escapeHtml(query)}"...</div>`;
+
+  try {
+    const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const results = data.results || [];
+
+    if (results.length === 0) {
+      resultsEl.innerHTML = `<div style="padding: 10px; color: #94a3b8; font-size: 0.85rem;">No matching places found. Try another search.</div>`;
+      return;
+    }
+
+    resultsEl.innerHTML = results.map(r => `
+      <div class="search-result-item" style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; text-align: left;"
+           onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'"
+           onclick="selectSearchResult('${type}', ${r.latitude}, ${r.longitude}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">
+        <strong style="color: #0f172a; font-size: 0.88rem;">${escapeHtml(r.name)}</strong>
+        <div style="color: #64748b; font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(r.display_name)}</div>
+        <span style="display: inline-block; font-size: 0.7rem; font-family: monospace; color: #0284c7; background: #e0f2fe; padding: 1px 5px; border-radius: 4px; margin-top: 2px;">${r.latitude}, ${r.longitude}</span>
+      </div>
+    `).join("");
+  } catch (err) {
+    resultsEl.innerHTML = `<div style="padding: 10px; color: #dc2626; font-size: 0.85rem;">Geocoding error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function selectSearchResult(type, lat, lon, name) {
+  const resultsEl = document.getElementById(`loc${type}_search_results`);
+  if (resultsEl) resultsEl.style.display = "none";
+  setPresetLocation(type, name, lat, lon);
+}
+
+// Close geocoding dropdowns when clicking outside
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".place-search-group")) {
+    const drops = document.querySelectorAll(".search-results-dropdown");
+    drops.forEach(d => d.style.display = "none");
+  }
+});

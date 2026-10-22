@@ -470,6 +470,97 @@ def test_self_hosted_leaflet_assets(client):
     assert "unpkg.com/leaflet" not in html
 
 
+def test_geocode_endpoint_validation(client):
+    # Missing query
+    res = client.get("/api/geocode")
+    assert res.status_code == 400
+    assert "error" in res.get_json()
+
+    # Empty query
+    res_empty = client.get("/api/geocode?q=  ")
+    assert res_empty.status_code == 400
+
+
+def test_geocode_endpoint_mocked_http_and_caching(client, monkeypatch):
+    import requests
+
+    call_count = 0
+
+    class MockResponse:
+        status_code = 200
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return [
+                {
+                    "lat": "18.5204",
+                    "lon": "73.8567",
+                    "display_name": "Pune, Maharashtra, India",
+                    "name": "Pune",
+                    "type": "city",
+                    "importance": 0.88,
+                }
+            ]
+
+    def mock_get(url, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        assert "nominatim.openstreetmap.org" in url
+        # Verify custom User-Agent header per Nominatim policy
+        headers = kwargs.get("headers", {})
+        assert "User-Agent" in headers
+        assert "ADAPTFIT" in headers["User-Agent"]
+        return MockResponse()
+
+    monkeypatch.setattr(requests, "get", mock_get)
+
+    # First call: hits mocked Nominatim
+    res1 = client.get("/api/geocode?q=Pune")
+    assert res1.status_code == 200
+    d1 = res1.get_json()
+    assert d1["query"] == "Pune"
+    assert len(d1["results"]) == 1
+    assert d1["results"][0]["name"] == "Pune"
+    assert d1["results"][0]["latitude"] == 18.5204
+    assert d1["results"][0]["longitude"] == 73.8567
+    assert call_count == 1
+
+    # Second call: must be served from cache without calling requests.get again
+    res2 = client.get("/api/geocode?q=Pune")
+    assert res2.status_code == 200
+    d2 = res2.get_json()
+    assert len(d2["results"]) == 1
+    assert d2["results"][0]["name"] == "Pune"
+    assert call_count == 1, "Expected second call to use SQLite geocoding cache"
+
+
+def test_geocode_endpoint_fallback_on_failure(client, monkeypatch):
+    import requests
+
+    def mock_get_fail(url, *args, **kwargs):
+        raise requests.RequestException("Simulated connection timeout")
+
+    monkeypatch.setattr(requests, "get", mock_get_fail)
+
+    # Searching for a sample place like "Pimpri" should fall back to sample CSV without crashing
+    res = client.get("/api/geocode?q=Pimpri")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert "results" in data
+    assert any("Pimpri" in r["name"] for r in data["results"])
+
+
+def test_geocode_ui_elements_in_assessment_page(client):
+    res = client.get("/new")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "locA_search" in html
+    assert "locB_search" in html
+    assert "searchPlace('A')" in html
+    assert "searchPlace('B')" in html
+
+
+
 
 
 

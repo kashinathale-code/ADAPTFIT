@@ -53,6 +53,15 @@
             <button type="button" class="chip" onclick="setPresetLocation('A', 'Pimpri', 18.6298, 73.7997)">Pimpri</button>
           </div>
 
+          <div class="form-group place-search-group" style="position: relative;">
+            <label for="locA_search" class="form-label">Search Place Name (Nominatim)</label>
+            <div class="search-input-wrapper" style="display: flex; gap: 6px;">
+              <input type="text" id="locA_search" class="form-control" placeholder="Search city or town (e.g. Pune)..." onkeydown="if(event.key==='Enter'){event.preventDefault();searchPlace('A');}">
+              <button type="button" class="btn btn-sm btn-secondary" onclick="searchPlace('A')">Search</button>
+            </div>
+            <div id="locA_search_results" class="search-results-dropdown" style="display: none;"></div>
+          </div>
+
           <div class="form-group">
             <label for="locA_name" class="form-label">Location A Name</label>
             <input type="text" id="locA_name" class="form-control" value="Pune city" placeholder="e.g. Pune Reference Site" required>
@@ -82,6 +91,15 @@
             <button type="button" class="chip" onclick="setPresetLocation('B', 'Niphad', 20.0800, 74.1100)">Niphad</button>
             <button type="button" class="chip" onclick="setPresetLocation('B', 'Lonavala', 18.7557, 73.4091)">Lonavala</button>
             <button type="button" class="chip" onclick="setPresetLocation('B', 'Nashik city', 19.9975, 73.7898)">Nashik</button>
+          </div>
+
+          <div class="form-group place-search-group" style="position: relative;">
+            <label for="locB_search" class="form-label">Search Place Name (Nominatim)</label>
+            <div class="search-input-wrapper" style="display: flex; gap: 6px;">
+              <input type="text" id="locB_search" class="form-control" placeholder="Search city or town (e.g. Niphad)..." onkeydown="if(event.key==='Enter'){event.preventDefault();searchPlace('B');}">
+              <button type="button" class="btn btn-sm btn-secondary" onclick="searchPlace('B')">Search</button>
+            </div>
+            <div id="locB_search_results" class="search-results-dropdown" style="display: none;"></div>
           </div>
 
           <div class="form-group">

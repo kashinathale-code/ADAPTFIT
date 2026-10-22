@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime, timezone
+import json
 import math
 import os
 import sqlite3
+import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -865,6 +868,124 @@ def fetch_osm_building_distance(
             "Live building_distance data from OpenStreetMap was unavailable; fell back to demo/sample data.",
         )
 
+
+# OpenStreetMap Nominatim Geocoding configuration
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_USER_AGENT = "ADAPTFIT/1.0 (Climate Adaptation Transferability Tool; https://github.com/adaptfit)"
+
+_nominatim_lock = threading.Lock()
+_last_nominatim_request_time = 0.0
+
+
+def _rate_limit_nominatim() -> None:
+    """Enforce maximum 1 request per second to comply with Nominatim Usage Policy."""
+    global _last_nominatim_request_time
+    with _nominatim_lock:
+        now = time.time()
+        elapsed = now - _last_nominatim_request_time
+        if elapsed < 1.0:
+            time.sleep(1.0 - elapsed)
+        _last_nominatim_request_time = time.time()
+
+
+def geocode_place(
+    query: str,
+    db_path: Optional[str] = None,
+    timeout: float = 8.0,
+) -> List[Dict[str, Any]]:
+    """
+    Search place name using OpenStreetMap Nominatim API with SQLite caching,
+    strict 1 req/s rate limiting, and graceful offline/error fallback to sample data.
+    """
+    if not query or not query.strip():
+        return []
+
+    q_clean = query.strip()
+    q_norm = q_clean.lower()
+    target_db = db_path or Config.DATABASE_PATH
+
+    # 1. Ensure geocoding_cache table exists and check SQLite cache
+    conn = None
+    try:
+        conn = sqlite3.connect(target_db, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS geocoding_cache (
+                query TEXT PRIMARY KEY,
+                results_json TEXT NOT NULL,
+                retrieved_at TEXT NOT NULL
+            )
+            """
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT results_json FROM geocoding_cache WHERE query = ?", (q_norm,))
+        row = cur.fetchone()
+        if row:
+            conn.close()
+            return json.loads(row[0])
+    except Exception:
+        conn = None
+
+    # 2. Rate-limit and query Nominatim
+    results: List[Dict[str, Any]] = []
+    try:
+        _rate_limit_nominatim()
+        headers = {"User-Agent": NOMINATIM_USER_AGENT}
+        params = {
+            "q": q_clean,
+            "format": "json",
+            "limit": 5,
+            "addressdetails": 1,
+        }
+        resp = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if isinstance(data, list):
+            for item in data:
+                try:
+                    display_name = item.get("display_name", "")
+                    short_name = item.get("name") or (display_name.split(",")[0] if display_name else q_clean)
+                    results.append({
+                        "name": short_name,
+                        "display_name": display_name,
+                        "latitude": round(float(item["lat"]), 4),
+                        "longitude": round(float(item["lon"]), 4),
+                        "type": item.get("type"),
+                        "importance": item.get("importance"),
+                    })
+                except (KeyError, ValueError, TypeError):
+                    continue
+    except Exception:
+        # Graceful fallback: check local sample_environmental_data.csv
+        sample_locs = load_sample_locations()
+        for loc in sample_locs:
+            if q_norm in loc["name"].lower():
+                results.append({
+                    "name": loc["name"],
+                    "display_name": f"{loc['name']}, Maharashtra, India",
+                    "latitude": round(float(loc["latitude"]), 4),
+                    "longitude": round(float(loc["longitude"]), 4),
+                    "type": "sample_location",
+                    "importance": 0.5,
+                })
+
+    # 3. Store results in cache if connection active
+    if conn:
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT OR REPLACE INTO geocoding_cache (query, results_json, retrieved_at) VALUES (?, ?, ?)",
+                (q_norm, json.dumps(results), now_iso),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    return results
 
 
 def _parse_float(val: Any) -> Optional[float]:

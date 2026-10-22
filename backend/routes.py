@@ -25,6 +25,7 @@ from backend.data_fetcher import (
     FACTOR_KEYS,
     FACTOR_UNITS,
     fetch_location_environmental_data,
+    geocode_place,
 )
 from backend.data_processor import (
     clean_environmental_value,
@@ -229,6 +230,22 @@ def get_location_data():
         "live_osm_used": data.get("live_osm_used", False),
     }
     return jsonify(response_payload), 200
+
+
+# --------------------------------------------------------------------------- #
+# GET /api/geocode?q=...                                                     #
+# --------------------------------------------------------------------------- #
+
+@api_bp.route("/geocode", methods=["GET"])
+def geocode_endpoint():
+    """Geocode a place name using OpenStreetMap Nominatim with caching and rate limiting."""
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "Query parameter 'q' is required."}), 400
+
+    db_path = current_app.config.get("DATABASE_PATH")
+    results = geocode_place(query, db_path=db_path)
+    return jsonify({"query": query, "results": results}), 200
 
 
 # --------------------------------------------------------------------------- #

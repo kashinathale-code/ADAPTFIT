@@ -63,3 +63,9 @@ CREATE TABLE IF NOT EXISTS assessment_factors (
   factor_status TEXT,             -- met / unmet / unknown / transfer_risk
   interpretation TEXT
 );
+
+CREATE TABLE IF NOT EXISTS geocoding_cache (
+  query TEXT PRIMARY KEY,
+  results_json TEXT NOT NULL,
+  retrieved_at TEXT NOT NULL
+);
