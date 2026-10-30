@@ -8,19 +8,26 @@ values represented strictly as None (null in JSON).
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, wait, as_completed, TimeoutError
 import csv
 from datetime import datetime, timezone
 import json
 import math
 import os
+import queue
 import sqlite3
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
 from config import Config
+
+# Dedicated worker thread pool for parallel live fetches (NASA POWER, Open-Meteo, SoilGrids, Overpass)
+_FETCH_EXECUTOR = ThreadPoolExecutor(max_workers=20, thread_name_prefix="adaptfit-fetch")
+_CACHE_WARM_LOCK = threading.Lock()
+_CACHE_WARM_STARTED = False
 from backend.gis_processor import (
     haversine_distance,
     get_slope_sampling_offsets,
@@ -567,6 +574,39 @@ def load_snapshots_into_cache(db_path: Optional[str] = None, snapshots_path: Opt
     return count
 
 
+def start_cache_warming_if_needed(
+    db_path: Optional[str] = None,
+    csv_path: Optional[str] = None,
+    force: bool = False,
+) -> bool:
+    """
+    Pre-warm the cache for the five demo locations in a background thread at startup.
+    Runs off the main thread, never blocks or crashes startup, and runs only once per boot.
+    """
+    global _CACHE_WARM_STARTED
+    with _CACHE_WARM_LOCK:
+        if _CACHE_WARM_STARTED and not force:
+            return False
+        _CACHE_WARM_STARTED = True
+
+    def _worker():
+        try:
+            warm_cache_demo_locations(db_path=db_path, csv_path=csv_path)
+        except Exception:
+            pass
+
+    try:
+        t = threading.Thread(
+            target=_worker,
+            daemon=True,
+            name="adaptfit-cache-warmer",
+        )
+        t.start()
+        return True
+    except Exception:
+        return False
+
+
 def warm_cache_demo_locations(db_path: Optional[str] = None, csv_path: Optional[str] = None) -> None:
     """
     Warm cache for demonstration locations (Pune, Pimpri, Niphad, Lonavala, Nashik)
@@ -593,9 +633,69 @@ def warm_cache_demo_locations(db_path: Optional[str] = None, csv_path: Optional[
                 use_live_slope=True,
                 use_live_soil=True,
                 use_live_osm=True,
+                timeout=5.0,
+                deadline_seconds=12.0,
             )
         except Exception:
             pass
+
+
+def _handle_deadline_miss(
+    factor: str,
+    source_name: str,
+    lat: float,
+    lon: float,
+    name: Optional[str],
+    snapshots_path: Optional[str],
+    matched_record: Optional[Dict[str, Any]],
+    deadline_seconds: float = 12.0,
+) -> Tuple[Optional[float], Optional[Dict[str, Any]], Optional[str], bool]:
+    """
+    Fallback when live call misses deadline: use cached snapshot or demo value
+    with honest labels and a data_quality_warning instead of waiting.
+    """
+    snapshot = get_saved_snapshot(factor, lat, lon, name, snapshots_path)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if snapshot is not None and snapshot.get("value") is not None:
+        snap_val = snapshot.get("value")
+        snap_date = snapshot.get("fetch_date") or snapshot.get("data_date") or "2026-10-22"
+        snap_res = snapshot.get("resolution") or DEMO_RESOLUTION
+        snap_trans = snapshot.get("transformation") or "Retrieved from cached live snapshot"
+        source_label = f"Live (cached snapshot, {snap_date})"
+        meta = {
+            "unit": FACTOR_UNITS.get(factor, ""),
+            "source": source_label,
+            "resolution": snap_res,
+            "data_date": snap_date,
+            "retrieved_at": now_iso,
+            "transformation": snap_trans,
+        }
+        warn = f"Live {factor} from {source_name} missed deadline ({deadline_seconds:.0f}s); used saved snapshot from {snap_date}."
+        return snap_val, meta, warn, False
+
+    if matched_record and matched_record.get("factors", {}).get(factor) is not None:
+        demo_val = matched_record["factors"][factor]
+        meta = {
+            "unit": FACTOR_UNITS.get(factor, ""),
+            "source": DEMO_SOURCE,
+            "resolution": matched_record.get("resolution") or DEMO_RESOLUTION,
+            "data_date": matched_record.get("data_date"),
+            "retrieved_at": now_iso,
+            "transformation": "Demo value from sample dataset fallback after deadline timeout",
+        }
+        warn = f"Live {factor} from {source_name} missed deadline ({deadline_seconds:.0f}s); fell back to demo/sample data."
+        return demo_val, meta, warn, False
+
+    meta = {
+        "unit": FACTOR_UNITS.get(factor, ""),
+        "source": None,
+        "resolution": None,
+        "data_date": None,
+        "retrieved_at": now_iso,
+        "transformation": None,
+    }
+    warn = f"Live {factor} from {source_name} missed deadline ({deadline_seconds:.0f}s); value is unknown."
+    return None, meta, warn, False
 
 
 
@@ -677,7 +777,8 @@ def cache_feature(
     if not os.path.exists(db_path):
         return
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout = 30000")
         conn.execute("PRAGMA foreign_keys = ON")
         cur = conn.cursor()
 
@@ -1764,16 +1865,17 @@ def fetch_location_environmental_data(
     db_path: Optional[str] = None,
     staleness_hours: Optional[int] = None,
     snapshots_path: Optional[str] = None,
+    timeout: Optional[float] = None,
+    deadline_seconds: Optional[float] = None,
+    on_factor_ready: Optional[Callable[[str, Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """
     Fetch environmental values and metadata for a given coordinate or location name.
     
-    If use_live_rainfall is True, annual_rainfall is fetched from NASA POWER.
-    If use_live_slope is True, slope is fetched from Open-Meteo elevation.
-    If use_live_soil is True, soil_infiltration is fetched from SoilGrids (or cached snapshot).
-    If use_live_osm is True, open_space and building_distance are fetched from Overpass mirrors (or cached snapshot).
-    All other factors stay from the CSV (or fall back to snapshot, then CSV demo data).
-    When all live flags are False, behaviour is exactly as default (CSV only).
+    If live flags are enabled, live sources (NASA POWER, Open-Meteo, SoilGrids, Overpass)
+    are fetched in parallel using a thread pool with a hard overall deadline of ~12 seconds.
+    If a source misses the deadline, it falls back to the cached snapshot or demo value
+    with honest labels and a data_quality_warning.
     """
     if use_live_rainfall is None:
         try:
@@ -1824,6 +1926,30 @@ def fetch_location_environmental_data(
     use_live_slope = _parse_bool(use_live_slope)
     use_live_soil = _parse_bool(use_live_soil)
     use_live_osm = _parse_bool(use_live_osm)
+
+    if timeout is not None:
+        per_call_timeout = float(timeout)
+    else:
+        try:
+            from flask import current_app
+            if current_app:
+                per_call_timeout = float(current_app.config.get("LIVE_CALL_TIMEOUT", 5.0))
+            else:
+                per_call_timeout = 10.0
+        except (RuntimeError, ImportError):
+            per_call_timeout = 10.0
+
+    if deadline_seconds is not None:
+        hard_deadline = float(deadline_seconds)
+    else:
+        try:
+            from flask import current_app
+            if current_app:
+                hard_deadline = float(current_app.config.get("LOCATION_DEADLINE_SECONDS", 12.0))
+            else:
+                hard_deadline = float(getattr(Config, "LOCATION_DEADLINE_SECONDS", 12.0))
+        except (RuntimeError, ImportError):
+            hard_deadline = float(getattr(Config, "LOCATION_DEADLINE_SECONDS", 12.0))
 
     if staleness_hours is None:
         try:
@@ -1911,146 +2037,300 @@ def fetch_location_environmental_data(
             f"(~{int(max_distance_km)} km radius); all environmental values are unknown."
         )
 
-    # If live rainfall flag is enabled: fetch NASA POWER for annual_rainfall
+    # -----------------------------------------------------------------------
+    # Parallel Live Source Fetching using ThreadPool with 12s Hard Deadline
+    # -----------------------------------------------------------------------
+    futures: Dict[str, concurrent.futures.Future] = {}
+    loc_name_hint = name or (matched_record.get("name") if matched_record else None)
+
+    if use_live_rainfall:
+        futures["annual_rainfall"] = _FETCH_EXECUTOR.submit(
+            fetch_nasa_power_rainfall,
+            lat=lat,
+            lon=lon,
+            db_path=db_path,
+            staleness_hours=staleness_hours,
+            timeout=per_call_timeout,
+            name=loc_name_hint,
+            snapshots_path=snapshots_path,
+        )
+
+    if use_live_slope:
+        futures["slope"] = _FETCH_EXECUTOR.submit(
+            fetch_open_meteo_slope,
+            lat=lat,
+            lon=lon,
+            db_path=db_path,
+            staleness_hours=staleness_hours,
+            timeout=per_call_timeout,
+            name=loc_name_hint,
+            snapshots_path=snapshots_path,
+        )
+
+    if use_live_soil:
+        futures["soil_infiltration"] = _FETCH_EXECUTOR.submit(
+            fetch_soilgrids_infiltration,
+            lat=lat,
+            lon=lon,
+            db_path=db_path,
+            staleness_hours=staleness_hours,
+            timeout=per_call_timeout,
+            name=loc_name_hint,
+            snapshots_path=snapshots_path,
+        )
+
+    if use_live_osm:
+        def _fetch_overpass_both():
+            try:
+                os_res = fetch_osm_open_space(
+                    lat=lat,
+                    lon=lon,
+                    db_path=db_path,
+                    staleness_hours=staleness_hours,
+                    timeout=per_call_timeout,
+                    name=loc_name_hint,
+                    snapshots_path=snapshots_path,
+                )
+            except Exception:
+                val, meta, warn, _ = _handle_deadline_miss(
+                    "open_space", "OpenStreetMap", lat, lon, loc_name_hint,
+                    snapshots_path, matched_record, hard_deadline
+                )
+                os_res = (val, meta, warn)
+            if on_factor_ready:
+                val, meta, warn = os_res
+                on_factor_ready("open_space", {
+                    "value": val,
+                    "unit": meta.get("unit", FACTOR_UNITS.get("open_space", "")) if meta else "",
+                    "source": meta.get("source") if meta else DEMO_SOURCE,
+                    "resolution": meta.get("resolution") if meta else DEMO_RESOLUTION,
+                    "data_date": meta.get("data_date") if meta else None,
+                    "warning": warn,
+                })
+
+            try:
+                bd_res = fetch_osm_building_distance(
+                    lat=lat,
+                    lon=lon,
+                    db_path=db_path,
+                    staleness_hours=staleness_hours,
+                    timeout=per_call_timeout,
+                    name=loc_name_hint,
+                    snapshots_path=snapshots_path,
+                )
+            except Exception:
+                val, meta, warn, _ = _handle_deadline_miss(
+                    "building_distance", "OpenStreetMap", lat, lon, loc_name_hint,
+                    snapshots_path, matched_record, hard_deadline
+                )
+                bd_res = (val, meta, warn)
+            if on_factor_ready:
+                val, meta, warn = bd_res
+                on_factor_ready("building_distance", {
+                    "value": val,
+                    "unit": meta.get("unit", FACTOR_UNITS.get("building_distance", "")) if meta else "",
+                    "source": meta.get("source") if meta else DEMO_SOURCE,
+                    "resolution": meta.get("resolution") if meta else DEMO_RESOLUTION,
+                    "data_date": meta.get("data_date") if meta else None,
+                    "warning": warn,
+                })
+            return os_res, bd_res
+
+        futures["osm"] = _FETCH_EXECUTOR.submit(_fetch_overpass_both)
+
+    if on_factor_ready and futures:
+        source_labels = {
+            "annual_rainfall": "NASA POWER",
+            "slope": "Open-Meteo",
+            "soil_infiltration": "SoilGrids",
+        }
+        for f_key in ("annual_rainfall", "slope", "soil_infiltration"):
+            if f_key not in futures:
+                continue
+            future_obj = futures[f_key]
+            def _bind_cb(factor_key, fut):
+                def _cb(_f):
+                    try:
+                        if fut.exception() is None:
+                            val, meta, warn = fut.result()
+                            if meta is not None:
+                                on_factor_ready(factor_key, {
+                                    "value": val,
+                                    "unit": meta.get("unit", FACTOR_UNITS.get(factor_key, "")),
+                                    "source": meta.get("source"),
+                                    "resolution": meta.get("resolution"),
+                                    "data_date": meta.get("data_date"),
+                                    "warning": warn,
+                                })
+                                return
+                    except Exception:
+                        pass
+                    val, meta, warn, _ = _handle_deadline_miss(
+                        factor_key, source_labels.get(factor_key, "Live source"),
+                        lat, lon, loc_name_hint, snapshots_path, matched_record, hard_deadline
+                    )
+                    on_factor_ready(factor_key, {
+                        "value": val,
+                        "unit": meta.get("unit", FACTOR_UNITS.get(factor_key, "")) if meta else "",
+                        "source": meta.get("source") if meta else DEMO_SOURCE,
+                        "resolution": meta.get("resolution") if meta else DEMO_RESOLUTION,
+                        "data_date": meta.get("data_date") if meta else None,
+                        "warning": warn,
+                    })
+                return _cb
+            future_obj.add_done_callback(_bind_cb(f_key, future_obj))
+
+    done = set()
+    not_done = set()
+    if futures:
+        done, not_done = wait(list(futures.values()), timeout=hard_deadline)
+
     live_rainfall_used = False
     if use_live_rainfall:
-        live_val, live_meta, live_warn = fetch_nasa_power_rainfall(
-            lat=lat,
-            lon=lon,
-            db_path=db_path,
-            staleness_hours=staleness_hours,
-            timeout=10.0,
-            name=name or (matched_record.get("name") if matched_record else None),
-            snapshots_path=snapshots_path,
-        )
-        if live_meta is not None:
-            values["annual_rainfall"] = live_val
-            metadata["annual_rainfall"] = live_meta
-            if live_meta.get("source", "").startswith("Live (cached snapshot"):
-                live_rainfall_used = False
+        fut = futures["annual_rainfall"]
+        if fut in done and fut.exception() is None:
+            live_val, live_meta, live_warn = fut.result()
+            if live_meta is not None:
+                values["annual_rainfall"] = live_val
+                metadata["annual_rainfall"] = live_meta
+                if live_meta.get("source", "").startswith("Live (cached snapshot"):
+                    live_rainfall_used = False
+                else:
+                    live_rainfall_used = (live_val is not None)
+                if live_warn:
+                    warnings.append(live_warn)
             else:
-                live_rainfall_used = (live_val is not None)
-            if live_warn:
-                warnings.append(live_warn)
+                if live_warn:
+                    warnings.append(live_warn)
+                if matched_record and values.get("annual_rainfall") is not None:
+                    metadata["annual_rainfall"]["source"] = DEMO_SOURCE
+                live_rainfall_used = False
         else:
-            # Fallback to CSV value (already in values["annual_rainfall"])
-            if live_warn:
-                warnings.append(live_warn)
-            if matched_record and values.get("annual_rainfall") is not None:
-                metadata["annual_rainfall"]["source"] = DEMO_SOURCE
-            live_rainfall_used = False
+            val, meta, warn, l_used = _handle_deadline_miss(
+                "annual_rainfall", "NASA POWER", lat, lon, loc_name_hint,
+                snapshots_path, matched_record, deadline_seconds=hard_deadline
+            )
+            values["annual_rainfall"] = val
+            metadata["annual_rainfall"] = meta
+            if warn:
+                warnings.append(warn)
+            live_rainfall_used = l_used
 
-    # If live slope flag is enabled: fetch Open-Meteo elevation for slope
     live_slope_used = False
     if use_live_slope:
-        live_slope_val, live_slope_meta, live_slope_warn = fetch_open_meteo_slope(
-            lat=lat,
-            lon=lon,
-            db_path=db_path,
-            staleness_hours=staleness_hours,
-            timeout=10.0,
-            name=name or (matched_record.get("name") if matched_record else None),
-            snapshots_path=snapshots_path,
-        )
-        if live_slope_meta is not None:
-            values["slope"] = live_slope_val
-            metadata["slope"] = live_slope_meta
-            if live_slope_meta.get("source", "").startswith("Live (cached snapshot"):
-                live_slope_used = False
+        fut = futures["slope"]
+        if fut in done and fut.exception() is None:
+            live_slope_val, live_slope_meta, live_slope_warn = fut.result()
+            if live_slope_meta is not None:
+                values["slope"] = live_slope_val
+                metadata["slope"] = live_slope_meta
+                if live_slope_meta.get("source", "").startswith("Live (cached snapshot"):
+                    live_slope_used = False
+                else:
+                    live_slope_used = (live_slope_val is not None)
+                if live_slope_warn:
+                    warnings.append(live_slope_warn)
             else:
-                live_slope_used = (live_slope_val is not None)
-            if live_slope_warn:
-                warnings.append(live_slope_warn)
+                if live_slope_warn:
+                    warnings.append(live_slope_warn)
+                if matched_record and values.get("slope") is not None:
+                    metadata["slope"]["source"] = DEMO_SOURCE
+                live_slope_used = False
         else:
-            # Fallback to CSV value (already in values["slope"])
-            if live_slope_warn:
-                warnings.append(live_slope_warn)
-            if matched_record and values.get("slope") is not None:
-                metadata["slope"]["source"] = DEMO_SOURCE
-            live_slope_used = False
+            val, meta, warn, l_used = _handle_deadline_miss(
+                "slope", "Open-Meteo", lat, lon, loc_name_hint,
+                snapshots_path, matched_record, deadline_seconds=hard_deadline
+            )
+            values["slope"] = val
+            metadata["slope"] = meta
+            if warn:
+                warnings.append(warn)
+            live_slope_used = l_used
 
-    # If live soil flag is enabled: fetch SoilGrids texture → infiltration estimate
     live_soil_used = False
     if use_live_soil:
-        live_soil_val, live_soil_meta, live_soil_warn = fetch_soilgrids_infiltration(
-            lat=lat,
-            lon=lon,
-            db_path=db_path,
-            staleness_hours=staleness_hours,
-            timeout=10.0,
-            name=name or (matched_record.get("name") if matched_record else None),
-            snapshots_path=snapshots_path,
-        )
-        if live_soil_meta is not None:
-            values["soil_infiltration"] = live_soil_val
-            metadata["soil_infiltration"] = live_soil_meta
-            if live_soil_meta.get("source", "").startswith("Live (cached snapshot"):
-                live_soil_used = False
+        fut = futures["soil_infiltration"]
+        if fut in done and fut.exception() is None:
+            live_soil_val, live_soil_meta, live_soil_warn = fut.result()
+            if live_soil_meta is not None:
+                values["soil_infiltration"] = live_soil_val
+                metadata["soil_infiltration"] = live_soil_meta
+                if live_soil_meta.get("source", "").startswith("Live (cached snapshot"):
+                    live_soil_used = False
+                else:
+                    live_soil_used = (live_soil_val is not None)
+                if live_soil_warn:
+                    warnings.append(live_soil_warn)
             else:
-                live_soil_used = (live_soil_val is not None)
-            if live_soil_warn:
-                warnings.append(live_soil_warn)
+                if live_soil_warn:
+                    warnings.append(live_soil_warn)
+                if matched_record and values.get("soil_infiltration") is not None:
+                    metadata["soil_infiltration"]["source"] = DEMO_SOURCE
+                live_soil_used = False
         else:
-            # Fallback to CSV value (already in values["soil_infiltration"])
-            if live_soil_warn:
-                warnings.append(live_soil_warn)
-            if matched_record and values.get("soil_infiltration") is not None:
-                metadata["soil_infiltration"]["source"] = DEMO_SOURCE
-            live_soil_used = False
+            val, meta, warn, l_used = _handle_deadline_miss(
+                "soil_infiltration", "SoilGrids", lat, lon, loc_name_hint,
+                snapshots_path, matched_record, deadline_seconds=hard_deadline
+            )
+            values["soil_infiltration"] = val
+            metadata["soil_infiltration"] = meta
+            if warn:
+                warnings.append(warn)
+            live_soil_used = l_used
 
-    # If live OSM flag is enabled: fetch open_space and building_distance from Overpass
     live_osm_used = False
     if use_live_osm:
-        loc_name_hint = name or (matched_record.get("name") if matched_record else None)
-
         live_osm_os = False
         live_osm_bd = False
 
-        # open_space
-        osm_os_val, osm_os_meta, osm_os_warn = fetch_osm_open_space(
-            lat=lat,
-            lon=lon,
-            db_path=db_path,
-            staleness_hours=staleness_hours,
-            timeout=10.0,
-            name=loc_name_hint,
-            snapshots_path=snapshots_path,
-        )
-        if osm_os_meta is not None:
-            values["open_space"] = osm_os_val
-            metadata["open_space"] = osm_os_meta
-            if not osm_os_meta.get("source", "").startswith("Live (cached snapshot"):
-                live_osm_os = True
-            if osm_os_warn:
-                warnings.append(osm_os_warn)
-        else:
-            if osm_os_warn:
-                warnings.append(osm_os_warn)
-            if matched_record and values.get("open_space") is not None:
-                metadata["open_space"]["source"] = DEMO_SOURCE
+        fut_osm = futures.get("osm")
+        if fut_osm in done and fut_osm.exception() is None:
+            (osm_os_val, osm_os_meta, osm_os_warn), (osm_bd_val, osm_bd_meta, osm_bd_warn) = fut_osm.result()
+            if osm_os_meta is not None:
+                values["open_space"] = osm_os_val
+                metadata["open_space"] = osm_os_meta
+                if not osm_os_meta.get("source", "").startswith("Live (cached snapshot"):
+                    live_osm_os = True
+                if osm_os_warn:
+                    warnings.append(osm_os_warn)
+            else:
+                if osm_os_warn:
+                    warnings.append(osm_os_warn)
+                if matched_record and values.get("open_space") is not None:
+                    metadata["open_space"]["source"] = DEMO_SOURCE
 
-        # building_distance
-        osm_bd_val, osm_bd_meta, osm_bd_warn = fetch_osm_building_distance(
-            lat=lat,
-            lon=lon,
-            db_path=db_path,
-            staleness_hours=staleness_hours,
-            timeout=10.0,
-            name=loc_name_hint,
-            snapshots_path=snapshots_path,
-        )
-        if osm_bd_meta is not None:
-            values["building_distance"] = osm_bd_val
-            metadata["building_distance"] = osm_bd_meta
-            if not osm_bd_meta.get("source", "").startswith("Live (cached snapshot"):
-                live_osm_bd = True
-            if osm_bd_warn:
-                warnings.append(osm_bd_warn)
+            if osm_bd_meta is not None:
+                values["building_distance"] = osm_bd_val
+                metadata["building_distance"] = osm_bd_meta
+                if not osm_bd_meta.get("source", "").startswith("Live (cached snapshot"):
+                    live_osm_bd = True
+                if osm_bd_warn:
+                    warnings.append(osm_bd_warn)
+            else:
+                if osm_bd_warn:
+                    warnings.append(osm_bd_warn)
+                if matched_record and values.get("building_distance") is not None:
+                    metadata["building_distance"]["source"] = DEMO_SOURCE
         else:
-            if osm_bd_warn:
-                warnings.append(osm_bd_warn)
-            if matched_record and values.get("building_distance") is not None:
-                metadata["building_distance"]["source"] = DEMO_SOURCE
+            val, meta, warn, l_used = _handle_deadline_miss(
+                "open_space", "OpenStreetMap", lat, lon, loc_name_hint,
+                snapshots_path, matched_record, deadline_seconds=hard_deadline
+            )
+            values["open_space"] = val
+            metadata["open_space"] = meta
+            if warn:
+                warnings.append(warn)
+            live_osm_os = l_used
+
+            val, meta, warn, l_used = _handle_deadline_miss(
+                "building_distance", "OpenStreetMap", lat, lon, loc_name_hint,
+                snapshots_path, matched_record, deadline_seconds=hard_deadline
+            )
+            values["building_distance"] = val
+            metadata["building_distance"] = meta
+            if warn:
+                warnings.append(warn)
+            live_osm_bd = l_used
 
         live_osm_used = bool(live_osm_os and live_osm_bd)
 
@@ -2068,3 +2348,112 @@ def fetch_location_environmental_data(
         "live_soil_used": live_soil_used,
         "live_osm_used": live_osm_used,
     }
+
+
+def fetch_location_pair_environmental_data(
+    loc_a: Dict[str, Any],
+    loc_b: Dict[str, Any],
+    csv_path: Optional[str] = None,
+    use_live_rainfall: Optional[bool] = None,
+    use_live_slope: Optional[bool] = None,
+    use_live_soil: Optional[bool] = None,
+    use_live_osm: Optional[bool] = None,
+    db_path: Optional[str] = None,
+    staleness_hours: Optional[int] = None,
+    snapshots_path: Optional[str] = None,
+    timeout: Optional[float] = None,
+    deadline_seconds: float = 12.0,
+    on_factor_ready: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Fetch environmental data for Location A and Location B in parallel using a thread pool
+    with a hard overall deadline of about 12 seconds per location.
+    
+    Calls on_factor_ready(location_key, factor_key, factor_payload) as each factor arrives.
+    """
+    # Resolve flags and configs on caller thread (which has access to current_app context if called from Flask)
+    try:
+        from flask import current_app
+        if current_app:
+            if use_live_rainfall is None:
+                use_live_rainfall = bool(current_app.config.get("USE_LIVE_RAINFALL", False))
+            if use_live_slope is None:
+                use_live_slope = bool(current_app.config.get("USE_LIVE_SLOPE", False))
+            if use_live_soil is None:
+                use_live_soil = bool(current_app.config.get("USE_LIVE_SOIL", False))
+            if use_live_osm is None:
+                use_live_osm = bool(current_app.config.get("USE_LIVE_OSM", False))
+            if timeout is None:
+                timeout = float(current_app.config.get("LIVE_CALL_TIMEOUT", 5.0))
+            if deadline_seconds is None or deadline_seconds == 12.0:
+                deadline_seconds = float(current_app.config.get("LOCATION_DEADLINE_SECONDS", 12.0))
+            if db_path is None:
+                db_path = current_app.config.get("DATABASE_PATH", Config.DATABASE_PATH)
+            if csv_path is None:
+                csv_path = current_app.config.get("SAMPLE_CSV_PATH")
+    except (RuntimeError, ImportError):
+        pass
+
+    cb_a = (lambda f_key, data: on_factor_ready("a", f_key, data)) if on_factor_ready else None
+    cb_b = (lambda f_key, data: on_factor_ready("b", f_key, data)) if on_factor_ready else None
+
+    fut_a = _FETCH_EXECUTOR.submit(
+        fetch_location_environmental_data,
+        lat=loc_a["lat"],
+        lon=loc_a["lon"],
+        name=loc_a.get("name"),
+        csv_path=csv_path,
+        use_live_rainfall=use_live_rainfall,
+        use_live_slope=use_live_slope,
+        use_live_soil=use_live_soil,
+        use_live_osm=use_live_osm,
+        db_path=db_path,
+        staleness_hours=staleness_hours,
+        snapshots_path=snapshots_path,
+        timeout=timeout,
+        deadline_seconds=deadline_seconds,
+        on_factor_ready=cb_a,
+    )
+
+    fut_b = _FETCH_EXECUTOR.submit(
+        fetch_location_environmental_data,
+        lat=loc_b["lat"],
+        lon=loc_b["lon"],
+        name=loc_b.get("name"),
+        csv_path=csv_path,
+        use_live_rainfall=use_live_rainfall,
+        use_live_slope=use_live_slope,
+        use_live_soil=use_live_soil,
+        use_live_osm=use_live_osm,
+        db_path=db_path,
+        staleness_hours=staleness_hours,
+        snapshots_path=snapshots_path,
+        timeout=timeout,
+        deadline_seconds=deadline_seconds,
+        on_factor_ready=cb_b,
+    )
+
+    done, not_done = wait([fut_a, fut_b], timeout=deadline_seconds + 2.0)
+    try:
+        data_a = fut_a.result() if fut_a in done else None
+    except Exception:
+        data_a = None
+    if data_a is None:
+        data_a = fetch_location_environmental_data(
+            lat=loc_a["lat"], lon=loc_a["lon"], name=loc_a.get("name"), csv_path=csv_path,
+            use_live_rainfall=False, use_live_slope=False, use_live_soil=False, use_live_osm=False,
+            db_path=db_path,
+        )
+
+    try:
+        data_b = fut_b.result() if fut_b in done else None
+    except Exception:
+        data_b = None
+    if data_b is None:
+        data_b = fetch_location_environmental_data(
+            lat=loc_b["lat"], lon=loc_b["lon"], name=loc_b.get("name"), csv_path=csv_path,
+            use_live_rainfall=False, use_live_slope=False, use_live_soil=False, use_live_osm=False,
+            db_path=db_path,
+        )
+
+    return data_a, data_b

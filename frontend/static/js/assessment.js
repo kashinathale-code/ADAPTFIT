@@ -208,36 +208,166 @@ async function loadAdaptations() {
 }
 
 /**
- * Update Environmental Preview Table by calling /api/location-data
+ * Update Environmental Preview Table by streaming /api/preview-stream (SSE)
+ * or falling back to /api/location-data.
  */
 let previewDebounceTimer = null;
+let currentPreviewSource = null;
+let currentPreviewDataA = null;
+let currentPreviewDataB = null;
+
+function showLoadingBanner(totalFactors = 5) {
+  const banner = document.getElementById("liveDataLoadingBanner");
+  const progressText = document.getElementById("loadingProgressText");
+  const progressBar = document.getElementById("loadingProgressBar");
+  if (!banner) return;
+  banner.style.display = "block";
+  if (progressBar) progressBar.style.width = "5%";
+  if (progressText) progressText.textContent = `Connecting to data sources (0/${totalFactors})...`;
+}
+
+function updateLoadingProgress(completed, total) {
+  const progressText = document.getElementById("loadingProgressText");
+  const progressBar = document.getElementById("loadingProgressBar");
+  const targetTotal = Math.max(1, total || 1);
+  const pct = Math.min(100, Math.max(5, Math.round((completed / targetTotal) * 100)));
+  if (progressBar) progressBar.style.width = `${pct}%`;
+  if (progressText) {
+    if (completed >= targetTotal) {
+      progressText.textContent = `All live factors loaded (${completed}/${targetTotal}).`;
+    } else {
+      progressText.textContent = `Loaded ${completed} of ${targetTotal} factors...`;
+    }
+  }
+}
+
+function hideLoadingBanner(delayMs = 600) {
+  const banner = document.getElementById("liveDataLoadingBanner");
+  if (!banner) return;
+  setTimeout(() => {
+    banner.style.display = "none";
+  }, delayMs);
+}
 
 function updateEnvironmentalPreview() {
   clearTimeout(previewDebounceTimer);
-  previewDebounceTimer = setTimeout(async () => {
-    const aLat = document.getElementById("locA_lat").value;
-    const aLon = document.getElementById("locA_lon").value;
-    const bLat = document.getElementById("locB_lat").value;
-    const bLon = document.getElementById("locB_lon").value;
+  previewDebounceTimer = setTimeout(() => {
+    const aLat = document.getElementById("locA_lat")?.value;
+    const aLon = document.getElementById("locA_lon")?.value;
+    const bLat = document.getElementById("locB_lat")?.value;
+    const bLon = document.getElementById("locB_lon")?.value;
+    const aName = document.getElementById("locA_name")?.value || "Location A";
+    const bName = document.getElementById("locB_name")?.value || "Location B";
 
     if (!aLat || !aLon || !bLat || !bLon) return;
 
-    try {
-      const [resA, resB] = await Promise.all([
-        fetch(`/api/location-data?lat=${aLat}&lon=${aLon}&name=${encodeURIComponent(document.getElementById("locA_name").value)}`),
-        fetch(`/api/location-data?lat=${bLat}&lon=${bLon}&name=${encodeURIComponent(document.getElementById("locB_name").value)}`)
-      ]);
+    if (currentPreviewSource) {
+      currentPreviewSource.close();
+      currentPreviewSource = null;
+    }
 
-      if (!resA.ok || !resB.ok) return;
+    if (typeof EventSource !== "undefined") {
+      const url = `/api/preview-stream?a_lat=${aLat}&a_lon=${aLon}&a_name=${encodeURIComponent(aName)}&b_lat=${bLat}&b_lon=${bLon}&b_name=${encodeURIComponent(bName)}`;
+      showLoadingBanner(5);
+      let completedFactors = 0;
+      let totalLiveExpected = 5;
 
-      const dataA = await resA.json();
-      const dataB = await resB.json();
+      const es = new EventSource(url);
+      currentPreviewSource = es;
 
-      renderPreviewTable(dataA, dataB);
-    } catch (err) {
-      console.error("Preview fetch error:", err);
+      es.addEventListener("init", (event) => {
+        try {
+          const initData = JSON.parse(event.data);
+          currentPreviewDataA = initData.locationA;
+          currentPreviewDataB = initData.locationB;
+          totalLiveExpected = (initData.live_factors && initData.live_factors.length > 0)
+            ? initData.live_factors.length * 2
+            : 0;
+          renderPreviewTable(currentPreviewDataA, currentPreviewDataB);
+          if (totalLiveExpected === 0) {
+            hideLoadingBanner(200);
+          }
+        } catch (e) {
+          console.error("Error parsing init event:", e);
+        }
+      });
+
+      es.addEventListener("factor", (event) => {
+        try {
+          const factorMsg = JSON.parse(event.data);
+          const loc = factorMsg.location;
+          const factorKey = factorMsg.factor;
+          const factorData = factorMsg.data;
+
+          if (loc === "a" && currentPreviewDataA) {
+            if (!currentPreviewDataA.factors) currentPreviewDataA.factors = {};
+            currentPreviewDataA.factors[factorKey] = factorData;
+            if (factorData.warning && !currentPreviewDataA.data_quality_warnings.includes(factorData.warning)) {
+              currentPreviewDataA.data_quality_warnings.push(factorData.warning);
+            }
+          } else if (loc === "b" && currentPreviewDataB) {
+            if (!currentPreviewDataB.factors) currentPreviewDataB.factors = {};
+            currentPreviewDataB.factors[factorKey] = factorData;
+            if (factorData.warning && !currentPreviewDataB.data_quality_warnings.includes(factorData.warning)) {
+              currentPreviewDataB.data_quality_warnings.push(factorData.warning);
+            }
+          }
+          completedFactors++;
+          updateLoadingProgress(completedFactors, totalLiveExpected);
+          renderPreviewTable(currentPreviewDataA, currentPreviewDataB);
+        } catch (e) {
+          console.error("Error parsing factor event:", e);
+        }
+      });
+
+      es.addEventListener("done", (event) => {
+        try {
+          const doneData = JSON.parse(event.data);
+          if (doneData.locationA) currentPreviewDataA = doneData.locationA;
+          if (doneData.locationB) currentPreviewDataB = doneData.locationB;
+          renderPreviewTable(currentPreviewDataA, currentPreviewDataB);
+          updateLoadingProgress(totalLiveExpected, totalLiveExpected);
+          hideLoadingBanner(600);
+        } catch (e) {
+          console.error("Error parsing done event:", e);
+        }
+        es.close();
+        if (currentPreviewSource === es) currentPreviewSource = null;
+      });
+
+      es.onerror = () => {
+        es.close();
+        if (currentPreviewSource === es) currentPreviewSource = null;
+        fetchStandardLocationData(aLat, aLon, aName, bLat, bLon, bName);
+      };
+    } else {
+      fetchStandardLocationData(aLat, aLon, aName, bLat, bLon, bName);
     }
   }, 250);
+}
+
+async function fetchStandardLocationData(aLat, aLon, aName, bLat, bLon, bName) {
+  showLoadingBanner(5);
+  try {
+    const [resA, resB] = await Promise.all([
+      fetch(`/api/location-data?lat=${aLat}&lon=${aLon}&name=${encodeURIComponent(aName)}`),
+      fetch(`/api/location-data?lat=${bLat}&lon=${bLon}&name=${encodeURIComponent(bName)}`)
+    ]);
+
+    if (!resA.ok || !resB.ok) return;
+
+    const dataA = await resA.json();
+    const dataB = await resB.json();
+    currentPreviewDataA = dataA;
+    currentPreviewDataB = dataB;
+
+    renderPreviewTable(dataA, dataB);
+    updateLoadingProgress(5, 5);
+  } catch (err) {
+    console.error("Preview fetch error:", err);
+  } finally {
+    hideLoadingBanner(600);
+  }
 }
 
 function renderPreviewTable(dataA, dataB) {

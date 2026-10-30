@@ -56,22 +56,15 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
     app.register_blueprint(api_bp)
 
     # Load really fetched live snapshots into SQLite cache (Render ephemeral DB recovery)
-    from backend.data_fetcher import load_snapshots_into_cache, warm_cache_demo_locations
+    from backend.data_fetcher import load_snapshots_into_cache, start_cache_warming_if_needed
     load_snapshots_into_cache(db_path=db_path)
 
-    # On startup, optionally warm the cache for demo locations in a background thread (never blocks boot)
+    # On startup, pre-warm cache for demo locations in background thread (runs once per boot, never blocks)
     warm_enabled = app.config.get("WARM_CACHE_ON_STARTUP", True)
     if isinstance(warm_enabled, str):
         warm_enabled = warm_enabled.lower() == "true"
     if warm_enabled and not app.config.get("TESTING", False):
-        import threading
-        t = threading.Thread(
-            target=warm_cache_demo_locations,
-            kwargs={"db_path": db_path},
-            daemon=True,
-            name="adaptfit-cache-warmer",
-        )
-        t.start()
+        start_cache_warming_if_needed(db_path=db_path)
 
     from backend.routes import get_configured_badge_info
 

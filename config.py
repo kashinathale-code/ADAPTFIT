@@ -32,6 +32,8 @@ class Config:
     USE_LIVE_SLOPE: bool = os.environ.get("USE_LIVE_SLOPE", "false").lower() == "true"
     USE_LIVE_SOIL: bool = os.environ.get("USE_LIVE_SOIL", "false").lower() == "true"
     USE_LIVE_OSM: bool = os.environ.get("USE_LIVE_OSM", "false").lower() == "true"
+    LIVE_CALL_TIMEOUT: float = float(os.environ.get("LIVE_CALL_TIMEOUT", "5.0"))
+    LOCATION_DEADLINE_SECONDS: float = float(os.environ.get("LOCATION_DEADLINE_SECONDS", "12.0"))
 
 
     # ------------------------------------------------------------------ #

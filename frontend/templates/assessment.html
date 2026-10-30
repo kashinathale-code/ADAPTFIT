@@ -249,6 +249,20 @@
           <span class="demo-badge-inline" id="previewTableHeaderBadge">Checking data sources...</span>
         </div>
 
+        <!-- Live Data Loading Banner with Progress -->
+        <div id="liveDataLoadingBanner" class="live-data-loading-banner" style="display: none;" role="status" aria-live="polite">
+          <div class="loading-banner-header">
+            <div class="loading-banner-title">
+              <span class="spinner-inline"></span>
+              <strong>Loading live data... this can take up to 30 seconds on first load</strong>
+            </div>
+            <span class="loading-progress-text" id="loadingProgressText">Connecting to data sources...</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="loadingProgressBar" style="width: 0%;"></div>
+          </div>
+        </div>
+
         <div class="table-responsive">
           <table class="preview-data-table" id="previewTable">
             <thead>

@@ -13,9 +13,10 @@ from __future__ import annotations
 import io
 import os
 import sqlite3
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from flask import Blueprint, current_app, jsonify, request, send_file
+from flask import Blueprint, current_app, jsonify, request, Response, send_file
 
 from backend.compatibility_engine import (
     DISCLAIMER,
@@ -27,6 +28,7 @@ from backend.data_fetcher import (
     FACTOR_KEYS,
     FACTOR_UNITS,
     fetch_location_environmental_data,
+    fetch_location_pair_environmental_data,
     geocode_place,
 )
 from backend.data_processor import (
@@ -96,6 +98,28 @@ def build_data_badge_label(factors_payload: List[Dict[str, Any]]) -> str:
     return " | ".join(parts)
 
 
+def _get_flag(key: str, cfg: Any = None) -> bool:
+    """Helper to extract a boolean flag from config or Config defaults."""
+    target_cfg = cfg
+    if target_cfg is None:
+        try:
+            from flask import current_app
+            if current_app:
+                target_cfg = current_app.config
+        except (RuntimeError, ImportError):
+            target_cfg = Config
+    if target_cfg is None:
+        target_cfg = Config
+
+    if hasattr(target_cfg, "get"):
+        v = target_cfg.get(key, getattr(Config, key, False))
+    else:
+        v = getattr(target_cfg, key, getattr(Config, key, False))
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
+    return bool(v)
+
+
 def get_configured_badge_info(app_config=None) -> Dict[str, Any]:
     """
     Compute data badge text and status based on application configuration and active flags.
@@ -103,19 +127,10 @@ def get_configured_badge_info(app_config=None) -> Dict[str, Any]:
     """
     cfg = app_config if app_config is not None else Config
 
-    def _get_flag(key: str) -> bool:
-        if hasattr(cfg, "get"):
-            v = cfg.get(key, getattr(Config, key, False))
-        else:
-            v = getattr(cfg, key, getattr(Config, key, False))
-        if isinstance(v, str):
-            return v.lower() == "true"
-        return bool(v)
-
-    live_rain = _get_flag("USE_LIVE_RAINFALL")
-    live_slope = _get_flag("USE_LIVE_SLOPE")
-    live_soil = _get_flag("USE_LIVE_SOIL")
-    live_osm = _get_flag("USE_LIVE_OSM")
+    live_rain = _get_flag("USE_LIVE_RAINFALL", cfg)
+    live_slope = _get_flag("USE_LIVE_SLOPE", cfg)
+    live_soil = _get_flag("USE_LIVE_SOIL", cfg)
+    live_osm = _get_flag("USE_LIVE_OSM", cfg)
 
     factors_payload = [
         {"factor": "annual_rainfall", "source": "Live: NASA POWER" if live_rain else "Demo value"},
@@ -153,19 +168,10 @@ def get_data_status():
     """Return data-driven header badge status, active live flags, and sources telemetry."""
     cfg = current_app.config
 
-    def _get_flag(key: str) -> bool:
-        if hasattr(cfg, "get"):
-            v = cfg.get(key, getattr(Config, key, False))
-        else:
-            v = getattr(cfg, key, getattr(Config, key, False))
-        if isinstance(v, str):
-            return v.lower() == "true"
-        return bool(v)
-
-    live_rain = _get_flag("USE_LIVE_RAINFALL")
-    live_slope = _get_flag("USE_LIVE_SLOPE")
-    live_soil = _get_flag("USE_LIVE_SOIL")
-    live_osm = _get_flag("USE_LIVE_OSM")
+    live_rain = _get_flag("USE_LIVE_RAINFALL", cfg)
+    live_slope = _get_flag("USE_LIVE_SLOPE", cfg)
+    live_soil = _get_flag("USE_LIVE_SOIL", cfg)
+    live_osm = _get_flag("USE_LIVE_OSM", cfg)
 
     flags = {
         "USE_LIVE_RAINFALL": live_rain,
@@ -286,6 +292,38 @@ def get_adaptations():
 # GET /api/location-data?lat=&lon=                                           #
 # --------------------------------------------------------------------------- #
 
+def format_location_response_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Format location environmental data dictionary for API JSON responses."""
+    factors_payload: Dict[str, Any] = {}
+    for factor in FACTOR_KEYS:
+        val = data["values"].get(factor)
+        meta = data["metadata"].get(factor, {})
+        factors_payload[factor] = {
+            "value": val,
+            "unit": meta.get("unit", FACTOR_UNITS.get(factor, "")),
+            "source": meta.get("source"),
+            "resolution": meta.get("resolution"),
+            "data_date": meta.get("data_date"),
+        }
+
+    meta_warnings = generate_metadata_warnings(data["metadata"], location_label=data["name"] or "Location")
+    all_warnings = list(dict.fromkeys(data["warnings"] + meta_warnings))
+
+    return {
+        "name": data["name"],
+        "latitude": data["latitude"],
+        "longitude": data["longitude"],
+        "matched_sample_location": data.get("matched_sample_location"),
+        "distance_km": data.get("distance_km"),
+        "factors": factors_payload,
+        "data_quality_warnings": all_warnings,
+        "live_rainfall_used": data.get("live_rainfall_used", False),
+        "live_slope_used": data.get("live_slope_used", False),
+        "live_soil_used": data.get("live_soil_used", False),
+        "live_osm_used": data.get("live_osm_used", False),
+    }
+
+
 @api_bp.route("/location-data", methods=["GET"])
 def get_location_data():
     """Retrieve environmental data and metadata for a given coordinate."""
@@ -305,38 +343,157 @@ def get_location_data():
         return jsonify({"error": str(err)}), 400
 
     csv_path = current_app.config.get("SAMPLE_CSV_PATH")
-    data = fetch_location_environmental_data(lat, lon, name=name_param, csv_path=csv_path)
+    call_timeout = float(current_app.config.get("LIVE_CALL_TIMEOUT", 5.0))
+    deadline = float(current_app.config.get("LOCATION_DEADLINE_SECONDS", 12.0))
+    data = fetch_location_environmental_data(
+        lat, lon, name=name_param, csv_path=csv_path,
+        use_live_rainfall=_get_flag("USE_LIVE_RAINFALL"),
+        use_live_slope=_get_flag("USE_LIVE_SLOPE"),
+        use_live_soil=_get_flag("USE_LIVE_SOIL"),
+        use_live_osm=_get_flag("USE_LIVE_OSM"),
+        timeout=call_timeout, deadline_seconds=deadline
+    )
 
-    # Format factors map matching TRD expectations
-    factors_payload: Dict[str, Any] = {}
-    for factor in FACTOR_KEYS:
-        val = data["values"].get(factor)
-        meta = data["metadata"].get(factor, {})
-        factors_payload[factor] = {
-            "value": val,
-            "unit": meta.get("unit", FACTOR_UNITS.get(factor, "")),
-            "source": meta.get("source"),
-            "resolution": meta.get("resolution"),
-            "data_date": meta.get("data_date"),
-        }
-
-    meta_warnings = generate_metadata_warnings(data["metadata"], location_label=data["name"] or "Location")
-    all_warnings = list(dict.fromkeys(data["warnings"] + meta_warnings))
-
-    response_payload = {
-        "name": data["name"],
-        "latitude": data["latitude"],
-        "longitude": data["longitude"],
-        "matched_sample_location": data.get("matched_sample_location"),
-        "distance_km": data.get("distance_km"),
-        "factors": factors_payload,
-        "data_quality_warnings": all_warnings,
-        "live_rainfall_used": data.get("live_rainfall_used", False),
-        "live_slope_used": data.get("live_slope_used", False),
-        "live_soil_used": data.get("live_soil_used", False),
-        "live_osm_used": data.get("live_osm_used", False),
-    }
+    response_payload = format_location_response_payload(data)
     return jsonify(response_payload), 200
+
+
+# --------------------------------------------------------------------------- #
+# GET /api/preview-stream                                                    #
+# --------------------------------------------------------------------------- #
+
+@api_bp.route("/preview-stream", methods=["GET"])
+def preview_stream():
+    """
+    Stream environmental factor results progressively for locations A and B (SSE).
+    Fetches locations A and B in parallel, with all live sources in parallel.
+    Returns results progressively as each factor arrives.
+    """
+    a_lat_str = request.args.get("a_lat") or request.args.get("latA")
+    a_lon_str = request.args.get("a_lon") or request.args.get("lonA")
+    a_name = request.args.get("a_name") or request.args.get("nameA") or "Location A"
+
+    b_lat_str = request.args.get("b_lat") or request.args.get("latB")
+    b_lon_str = request.args.get("b_lon") or request.args.get("lonB")
+    b_name = request.args.get("b_name") or request.args.get("nameB") or "Location B"
+
+    if None in (a_lat_str, a_lon_str, b_lat_str, b_lon_str):
+        return jsonify({"error": "Missing required coordinates for Location A or Location B."}), 400
+
+    try:
+        a_lat, a_lon = validate_coordinates(a_lat_str, a_lon_str)
+        b_lat, b_lon = validate_coordinates(b_lat_str, b_lon_str)
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+
+    csv_path = current_app.config.get("SAMPLE_CSV_PATH")
+    db_path = current_app.config.get("DATABASE_PATH")
+    live_rain = current_app.config.get("USE_LIVE_RAINFALL", False)
+    live_slope = current_app.config.get("USE_LIVE_SLOPE", False)
+    live_soil = current_app.config.get("USE_LIVE_SOIL", False)
+    live_osm = current_app.config.get("USE_LIVE_OSM", False)
+    call_timeout = float(current_app.config.get("LIVE_CALL_TIMEOUT", 5.0))
+    deadline = float(current_app.config.get("LOCATION_DEADLINE_SECONDS", 12.0))
+
+    live_factors = []
+    if live_rain:
+        live_factors.append("annual_rainfall")
+    if live_slope:
+        live_factors.append("slope")
+    if live_soil:
+        live_factors.append("soil_infiltration")
+    if live_osm:
+        live_factors.extend(["open_space", "building_distance"])
+
+    def generate():
+        import json
+        import queue
+
+        # 1. Immediately yield baseline (demo / cached data without new HTTP requests)
+        base_a = fetch_location_environmental_data(
+            a_lat, a_lon, name=a_name, csv_path=csv_path, db_path=db_path,
+            use_live_rainfall=False, use_live_slope=False, use_live_soil=False, use_live_osm=False
+        )
+        base_b = fetch_location_environmental_data(
+            b_lat, b_lon, name=b_name, csv_path=csv_path, db_path=db_path,
+            use_live_rainfall=False, use_live_slope=False, use_live_soil=False, use_live_osm=False
+        )
+
+        init_payload = {
+            "locationA": format_location_response_payload(base_a),
+            "locationB": format_location_response_payload(base_b),
+            "live_factors": live_factors,
+            "total_live": len(live_factors),
+        }
+        yield f"event: init\ndata: {json.dumps(init_payload)}\n\n"
+
+        if not live_factors:
+            yield f"event: done\ndata: {json.dumps({'locationA': format_location_response_payload(base_a), 'locationB': format_location_response_payload(base_b)})}\n\n"
+            return
+
+        factor_queue: queue.Queue = queue.Queue()
+
+        def on_factor(loc_key: str, f_key: str, f_data: Dict[str, Any]):
+            factor_queue.put((loc_key, f_key, f_data))
+
+        from backend.data_fetcher import _FETCH_EXECUTOR
+        fut = _FETCH_EXECUTOR.submit(
+            fetch_location_pair_environmental_data,
+            {"lat": a_lat, "lon": a_lon, "name": a_name},
+            {"lat": b_lat, "lon": b_lon, "name": b_name},
+            csv_path=csv_path,
+            db_path=db_path,
+            use_live_rainfall=live_rain,
+            use_live_slope=live_slope,
+            use_live_soil=live_soil,
+            use_live_osm=live_osm,
+            timeout=call_timeout,
+            deadline_seconds=deadline,
+            on_factor_ready=on_factor,
+        )
+
+        expected_count = len(live_factors) * 2
+        received_count = 0
+        start_t = time.monotonic()
+
+        while received_count < expected_count:
+            if time.monotonic() - start_t >= deadline + 1.5:
+                break
+            try:
+                item = factor_queue.get(timeout=0.2)
+                loc_key, f_key, f_data = item
+                msg = {"location": loc_key, "factor": f_key, "data": f_data}
+                yield f"event: factor\ndata: {json.dumps(msg)}\n\n"
+                received_count += 1
+            except queue.Empty:
+                if fut.done():
+                    while not factor_queue.empty():
+                        loc_key, f_key, f_data = factor_queue.get_nowait()
+                        msg = {"location": loc_key, "factor": f_key, "data": f_data}
+                        yield f"event: factor\ndata: {json.dumps(msg)}\n\n"
+                        received_count += 1
+                    break
+
+        try:
+            data_a, data_b = fut.result(timeout=1.0)
+        except Exception:
+            data_a, data_b = base_a, base_b
+
+        done_payload = {
+            "locationA": format_location_response_payload(data_a),
+            "locationB": format_location_response_payload(data_b),
+        }
+        yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -424,9 +581,23 @@ def _run_single_assessment(
 
     csv_path = current_app.config.get("SAMPLE_CSV_PATH")
 
-    # Fetch Location A profile (allow payload factor override)
+    # Fetch Location A and Location B profiles in parallel (thread pool with 12s deadline)
     ref_name = ref_loc.get("name") or "Location A"
-    fetched_a = fetch_location_environmental_data(ref_lat, ref_lon, name=ref_name, csv_path=csv_path)
+    tgt_name = tgt_loc.get("name") or "Location B"
+    call_timeout = float(current_app.config.get("LIVE_CALL_TIMEOUT", 5.0))
+    deadline = float(current_app.config.get("LOCATION_DEADLINE_SECONDS", 12.0))
+    fetched_a, fetched_b = fetch_location_pair_environmental_data(
+        {"lat": ref_lat, "lon": ref_lon, "name": ref_name},
+        {"lat": tgt_lat, "lon": tgt_lon, "name": tgt_name},
+        csv_path=csv_path,
+        use_live_rainfall=_get_flag("USE_LIVE_RAINFALL"),
+        use_live_slope=_get_flag("USE_LIVE_SLOPE"),
+        use_live_soil=_get_flag("USE_LIVE_SOIL"),
+        use_live_osm=_get_flag("USE_LIVE_OSM"),
+        db_path=current_app.config.get("DATABASE_PATH"),
+        timeout=call_timeout,
+        deadline_seconds=deadline,
+    )
     profile_a: Dict[str, Optional[float]] = {}
     meta_a: Dict[str, Dict[str, Any]] = {}
     user_factors_a = ref_loc.get("factors") if isinstance(ref_loc.get("factors"), dict) else {}
@@ -442,9 +613,6 @@ def _run_single_assessment(
         profile_a[fk] = val
         meta_a[fk] = fetched_a["metadata"].get(fk, {})
 
-    # Fetch Location B profile (allow payload factor override)
-    tgt_name = tgt_loc.get("name") or "Location B"
-    fetched_b = fetch_location_environmental_data(tgt_lat, tgt_lon, name=tgt_name, csv_path=csv_path)
     profile_b: Dict[str, Optional[float]] = {}
     meta_b: Dict[str, Dict[str, Any]] = {}
     user_factors_b = tgt_loc.get("factors") if isinstance(tgt_loc.get("factors"), dict) else {}
